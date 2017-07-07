@@ -10,7 +10,11 @@ target/
 lib_managed/
 src_managed/
 project/boot/
+project/target/
 project/plugins/project/
+
+# Intellij-IDE specific
+.idea/
 
 # Scala-IDE specific
 .scala_dependencies
