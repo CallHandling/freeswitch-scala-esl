@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-package ngage.parser
+package esl.parser
 
-import ngage.domain.ContentTypes
+import esl.domain.ContentTypes
 import org.scalatest.{FlatSpec, Matchers}
 
 class ParserTests extends FlatSpec with Matchers {
@@ -41,7 +41,7 @@ class ParserTests extends FlatSpec with Matchers {
     ls.map(_.contentLength) should be(List(68, 1751))
     ls.map(_.headers.size) should be(List(4, 52))
     ls.map(_.contentType) should be(List(ContentTypes.disconnectNotice, ContentTypes.eventPlain))
-    ls.map(_.getClass.getName) should be(List("ngage.domain.BasicMessage", "ngage.domain.EventMessage"))
+    ls.map(_.getClass.getName) should be(List("esl.domain.BasicMessage", "esl.domain.EventMessage"))
   }
 
   it must "parse a partial messages across multiple calls to parse" in {

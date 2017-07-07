@@ -14,16 +14,16 @@
  * limitations under the License.
  */
 
-package ngage
+package esl
 
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
 import akka.stream.{ActorMaterializer, OverflowStrategy}
 import akka.util.ByteString
-import ngage.domain.CallCommands._
-import ngage.domain._
-import ngage.parser.Parser
+import esl.domain.CallCommands._
+import esl.domain._
+import esl.parser.Parser
 
 trait FSConnection {
   val parser: Parser

@@ -1,9 +1,9 @@
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
-import ngage.InboundServer
-import ngage.domain.FSMessage
-import ngage.parser.DefaultParser
+import esl.InboundServer
+import esl.domain.FSMessage
+import esl.parser.DefaultParser
 import scala.concurrent.duration._
 
 

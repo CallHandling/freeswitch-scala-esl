@@ -13,17 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package esl.domain
 
-package ngage.parser
-
-import ngage.domain.FSMessage
-
-trait Parser {
-  /**
-    * This function should parse the text from the event socket and return a List of FreeSwitchMessages (Either BasicMessage or EventMessage)
-    *
-    * @param text The utf8 text coming in from the event socket
-    * @return A list of generic FreeSwitchMessages found in the txt
-    */
-  def parse(text: String): (List[FSMessage], String)
+object ContentTypes {
+  val eventPlain = "text/event-plain"
+  val eventJson = "text/event-json"
+  val eventXml = "text/event-xml"
+  val authRequest = "auth/request"
+  val commandReply = "command/reply"
+  val apiResponse = "api/response"
+  val disconnectNotice = "text/disconnect-notice"
+  val rudeRejection = "text/rude-rejection"
 }

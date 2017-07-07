@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-package ngage
+package esl
 
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
-import ngage.parser.Parser
+import esl.parser.Parser
 
 case class OutboundFSConnection(parser: Parser)(implicit actorSystem: ActorSystem, actorMaterializer: ActorMaterializer)
   extends FSConnection {

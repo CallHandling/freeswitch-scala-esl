@@ -13,10 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package ngage.parser
+package esl.parser
 
-import ngage.domain._
-import ngage.util.StringHelpers
+import esl.domain._
+import esl.util.StringHelpers
 
 import scala.annotation.tailrec
 
@@ -102,7 +102,7 @@ object DefaultParser extends Parser {
         case (t, Some(x), f) if !f && x.contentType == ContentTypes.commandReply &&
           !x.headers.contains(HeaderNames.eventName) =>
           doParse(t, CommandReply(x) :: msgs)
-        case (t, Some(x), f) =>
+        case (t, Some(x), _) =>
           doParse(t, x :: msgs)
       }
     }

@@ -13,15 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package esl.domain
 
-package ngage.domain
-
-trait FSMessageType
-
-case object CommandEvent extends FSMessageType
-
-case object DTMF extends FSMessageType
-
-case object CommandResponse extends FSMessageType
-
-case object Unknown extends FSMessageType
+trait ActionEvent

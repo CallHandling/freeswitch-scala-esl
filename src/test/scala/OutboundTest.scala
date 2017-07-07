@@ -1,8 +1,8 @@
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
-import ngage.OutboundServer
-import ngage.parser.DefaultParser
+import esl.OutboundServer
+import esl.parser.DefaultParser
 
 /**
   * Created by abdhesh on 28/06/17.

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package ngage.domain
+package esl.domain
 
 object HeaderNames {
   val contentLength = "Content-Length"

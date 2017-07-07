@@ -14,15 +14,16 @@
  * limitations under the License.
  */
 
-package ngage.domain
+package esl.domain
 
 object HangupCauses {
 
+  /**
+    * Standard telephony disconnect cause codes for ISDN
+    */
   sealed trait HangupCause {
-    /**
-      * Standard telephony disconnect cause codes for ISDN
-      */
     val q850Code: Int
+    val name: String
   }
 
   /**
@@ -31,6 +32,7 @@ object HangupCauses {
     */
   case object Unspecified extends HangupCause {
     val q850Code = 0
+    override val name: String = "UNSPECIFIED"
   }
 
   /**
@@ -38,6 +40,7 @@ object HangupCauses {
     */
   case object UnallocatedNumber extends HangupCause {
     val q850Code = 1
+    override val name: String = "UNALLOCATED_NUMBER"
   }
 
   /**
@@ -46,6 +49,7 @@ object HangupCauses {
     */
   case object NoRouteTransitNet extends HangupCause {
     val q850Code = 2
+    override val name: String = "NO_ROUTE_TRANSIT_NET"
   }
 
   /**
@@ -54,6 +58,7 @@ object HangupCauses {
     */
   case object NoRouteDestination extends HangupCause {
     val q850Code = 3
+    override val name: String = "NO_ROUTE_DESTINATION"
   }
 
   /**
@@ -61,6 +66,7 @@ object HangupCauses {
     */
   case object ChannelUnacceptable extends HangupCause {
     val q850Code = 6
+    override val name: String = "CHANNEL_UNACCEPTABLE"
   }
 
   /**
@@ -68,6 +74,7 @@ object HangupCauses {
     */
   case object CallAwardedDelivered extends HangupCause {
     val q850Code = 7
+    override val name: String = "CALL_AWARDED_DELIVERED"
   }
 
   /**
@@ -75,6 +82,7 @@ object HangupCauses {
     */
   case object NormalClearing extends HangupCause {
     val q850Code = 16
+    override val name: String = "NORMAL_CLEARING"
   }
 
   /**
@@ -83,6 +91,7 @@ object HangupCauses {
     */
   case object UserBusy extends HangupCause {
     val q850Code = 17
+    override val name: String = "USER_BUSY"
   }
 
   /**
@@ -90,6 +99,7 @@ object HangupCauses {
     */
   case object NoUserResponse extends HangupCause {
     val q850Code = 18
+    override val name: String = "NO_USER_RESPONSE"
   }
 
   /**
@@ -98,6 +108,7 @@ object HangupCauses {
     */
   case object NoAnswer extends HangupCause {
     val q850Code = 19
+    override val name: String = "NO_ANSWER"
   }
 
   /**
@@ -106,6 +117,7 @@ object HangupCauses {
     */
   case object SubscriberAbsent extends HangupCause {
     val q850Code = 20
+    override val name: String = "SUBSCRIBER_ABSENT"
   }
 
   /**
@@ -115,6 +127,7 @@ object HangupCauses {
     */
   case object CallRejected extends HangupCause {
     val q850Code = 21
+    override val name: String = "CALL_REJECTED"
   }
 
   /**
@@ -123,6 +136,7 @@ object HangupCauses {
     */
   case object NumberChanged extends HangupCause {
     val q850Code = 22
+    override val name: String = "NUMBER_CHANGED"
   }
 
   /**
@@ -131,6 +145,7 @@ object HangupCauses {
     */
   case object RedirectionToNewDestination extends HangupCause {
     val q850Code = 23
+    override val name: String = "REDIRECTION_TO_NEW_DESTINATION"
   }
 
   /**
@@ -139,6 +154,7 @@ object HangupCauses {
     */
   case object ExchangeRoutingError extends HangupCause {
     val q850Code = 25
+    override val name: String = "EXCHANGE_ROUTING_ERROR"
   }
 
   /**
@@ -148,6 +164,7 @@ object HangupCauses {
     */
   case object DestinationOutOfOrder extends HangupCause {
     val q850Code = 27
+    override val name: String = "DESTINATION_OUT_OF_ORDER"
   }
 
   /**
@@ -155,6 +172,7 @@ object HangupCauses {
     */
   case object InvalidNumberFormat extends HangupCause {
     val q850Code = 28
+    override val name: String = "INVALID_NUMBER_FORMAT"
   }
 
   /**
@@ -162,6 +180,7 @@ object HangupCauses {
     */
   case object FacilityRejected extends HangupCause {
     val q850Code = 29
+    override val name: String = "FACILITY_REJECTED"
   }
 
   /**
@@ -169,6 +188,7 @@ object HangupCauses {
     */
   case object ResponseToStatusEnquiry extends HangupCause {
     val q850Code = 30
+    override val name: String = "RESPONSE_TO_STATUS_ENQUIRY"
   }
 
   /**
@@ -176,6 +196,7 @@ object HangupCauses {
     */
   case object NormalUnspecified extends HangupCause {
     val q850Code = 31
+    override val name: String = "NORMAL_UNSPECIFIED"
   }
 
   /**
@@ -183,6 +204,7 @@ object HangupCauses {
     */
   case object NormalCircuitCongestion extends HangupCause {
     val q850Code = 34
+    override val name: String = "NORMAL_CIRCUIT_CONGESTION"
   }
 
   /**
@@ -191,6 +213,7 @@ object HangupCauses {
     */
   case object NetworkOutOfOrder extends HangupCause {
     val q850Code = 38
+    override val name: String = "NETWORK_OUT_OF_ORDER"
   }
 
   /**
@@ -199,6 +222,7 @@ object HangupCauses {
     */
   case object NormalTemporaryFailure extends HangupCause {
     val q850Code = 41
+    override val name: String = "NORMAL_TEMPORARY_FAILURE"
   }
 
   /**
@@ -206,18 +230,18 @@ object HangupCauses {
     */
   case object SwitchCongestion extends HangupCause {
     val q850Code = 42
+    override val name: String = "SWITCH_CONGESTION"
   }
 
 
   //ToDO : Add remaining hangup causes https://freeswitch.org/confluence/display/FREESWITCH/Hangup+Cause+Code+Table
 
 
-  val causes = Map("UNSPECIFIED" -> Unspecified, "UNALLOCATED_NUMBER" -> UnallocatedNumber, "NO_ROUTE_TRANSIT_NET" -> NoRouteTransitNet,
-    "NO_ROUTE_DESTINATION" -> NoRouteDestination, "CHANNEL_UNACCEPTABLE" -> ChannelUnacceptable, "CALL_AWARDED_DELIVERED" -> CallAwardedDelivered,
-    "NORMAL_CLEARING" -> NormalClearing, "USER_BUSY" -> UserBusy, "NO_USER_RESPONSE" -> NoUserResponse, "NO_ANSWER" -> NoAnswer,
-    "SUBSCRIBER_ABSENT" -> SubscriberAbsent, "CALL_REJECTED" -> CallRejected, "NUMBER_CHANGED" -> NumberChanged,
-    "REDIRECTION_TO_NEW_DESTINATION" -> RedirectionToNewDestination, "EXCHANGE_ROUTING_ERROR" -> ExchangeRoutingError,
-    "DESTINATION_OUT_OF_ORDER" -> DestinationOutOfOrder, "INVALID_NUMBER_FORMAT" -> InvalidNumberFormat, "FACILITY_REJECTED" -> FacilityRejected,
-    "RESPONSE_TO_STATUS_ENQUIRY" -> ResponseToStatusEnquiry, "NORMAL_UNSPECIFIED" -> NormalUnspecified, "NORMAL_CIRCUIT_CONGESTION" -> NormalCircuitCongestion,
-    "NETWORK_OUT_OF_ORDER" -> NetworkOutOfOrder, "NORMAL_TEMPORARY_FAILURE" -> NormalTemporaryFailure, "SWITCH_CONGESTION" -> SwitchCongestion)
+  val causes: Map[String, HangupCause] = List(
+    Unspecified, UnallocatedNumber, NoRouteTransitNet, NoRouteDestination, ChannelUnacceptable,
+    CallAwardedDelivered, NormalClearing, UserBusy, NoUserResponse, NoAnswer, SubscriberAbsent, CallRejected, NumberChanged,
+    RedirectionToNewDestination, ExchangeRoutingError, DestinationOutOfOrder, InvalidNumberFormat, FacilityRejected,
+    ResponseToStatusEnquiry, NormalUnspecified, NormalCircuitCongestion, NetworkOutOfOrder, NormalTemporaryFailure, SwitchCongestion)
+    .map(hangupCause => hangupCause.name -> hangupCause)
+    .toMap
 }

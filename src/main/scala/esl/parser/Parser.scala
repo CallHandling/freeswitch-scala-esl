@@ -13,14 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package ngage.util
 
-object StringHelpers {
-  def parseKeyValuePairs(string: String, delimiter: Char): Map[String, String] = {
-    string.split('\n').filter(p => p.length > 0).map { pair => {
-      val lst = pair.split(delimiter)
-      (lst(0), lst(1).drop(1))
-    }
-    }.toMap
-  }
+package esl.parser
+
+import esl.domain.FSMessage
+
+trait Parser {
+  /**
+    * This function should parse the text from the event socket and return a List of FreeSwitchMessages (Either BasicMessage or EventMessage)
+    *
+    * @param text The utf8 text coming in from the event socket
+    * @return A list of generic FreeSwitchMessages found in the txt
+    */
+  def parse(text: String): (List[FSMessage], String)
 }

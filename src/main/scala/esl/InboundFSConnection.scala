@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-package ngage
+package esl
 
 import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, QueueOfferResult}
-import ngage.domain.CallCommands.CommandAsString
-import ngage.parser.Parser
+import esl.domain.CallCommands.CommandAsString
+import esl.parser.Parser
 
 import scala.concurrent.Future
 

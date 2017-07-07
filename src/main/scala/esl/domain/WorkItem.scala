@@ -14,14 +14,22 @@
  * limitations under the License.
  */
 
-package ngage.domain
+package esl.domain
 
 import akka.actor.ActorRef
-import akka.util.ByteString
 
-trait FSBridgeCommand {}
-case class IgnoreUnknownCommand(cmd:Any) extends FSBridgeCommand
-case class ProcessFSData(data:ByteString) extends FSBridgeCommand
-case class ForwardCommand(cmd:FSCommand) extends FSBridgeCommand
-case class EndCall() extends FSBridgeCommand
-case class ConnectFSActor(fsActor:ActorRef) extends FSBridgeCommand
+/**
+  * Shared trait for all things that can be passed through a service
+  */
+trait WorkItem {}
+
+case class Dummy(uuid: String) extends WorkItem
+
+/**
+  *
+  * @param uuid    The uuid of the call
+  * @param ref     The ActorRef of the actor managing the underlying communication with a media and signalling server
+  * @param fromCli The cli of the person calling
+  * @param toCli   The cli of the destination - Used for matching services
+  */
+case class Call(uuid: String, ref: ActorRef, fromCli: String, toCli: String) extends WorkItem

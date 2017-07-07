@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package ngage.domain
+package esl.domain
 
 import akka.stream.QueueOfferResult
 

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package ngage
+package esl
 
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
@@ -22,8 +22,8 @@ import akka.stream.scaladsl.{BidiFlow, Flow, Sink, Source, Tcp}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
 import com.typesafe.config.Config
-import ngage.domain.FSMessage
-import ngage.parser.Parser
+import esl.domain.FSMessage
+import esl.parser.Parser
 
 import scala.concurrent.Future
 

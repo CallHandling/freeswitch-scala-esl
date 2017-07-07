@@ -14,6 +14,14 @@
  * limitations under the License.
  */
 
-package ngage.domain
+package esl.domain
 
-case class ActionEventResult(actionCompleted: Boolean, event: Option[ActionEvent])
+import akka.actor.ActorRef
+import akka.util.ByteString
+
+trait FSBridgeCommand {}
+case class IgnoreUnknownCommand(cmd:Any) extends FSBridgeCommand
+case class ProcessFSData(data:ByteString) extends FSBridgeCommand
+case class ForwardCommand(cmd:FSCommand) extends FSBridgeCommand
+case class EndCall() extends FSBridgeCommand
+case class ConnectFSActor(fsActor:ActorRef) extends FSBridgeCommand

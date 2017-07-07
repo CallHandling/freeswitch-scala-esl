@@ -13,15 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package ngage.domain
+package esl.util
 
-object ContentTypes {
-  val eventPlain = "text/event-plain"
-  val eventJson = "text/event-json"
-  val eventXml = "text/event-xml"
-  val authRequest = "auth/request"
-  val commandReply = "command/reply"
-  val apiResponse = "api/response"
-  val disconnectNotice = "text/disconnect-notice"
-  val rudeRejection = "text/rude-rejection"
+object StringHelpers {
+  def parseKeyValuePairs(string: String, delimiter: Char): Map[String, String] = {
+    string.split('\n').filter(p => p.length > 0).map { pair => {
+      val lst = pair.split(delimiter)
+      (lst(0), lst(1).drop(1))
+    }
+    }.toMap
+  }
 }
