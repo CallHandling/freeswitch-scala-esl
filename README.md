@@ -5,7 +5,7 @@ This library is intended to make the use of FreeSwitch easier for Scala develope
 
 To use this library we are proposing an interface like this:-
 
-#Inbound Mode
+# Inbound Mode
 
 This mode will make a connection to FreeSwitch and connect using the password supplied. It will wait up to the duration supplied for a response before returning a Timeout exception to the returned future in the event it times out. 
 
@@ -42,7 +42,7 @@ InboundServer("localhost", 8021, DefaultParser).connect("ClueCon", 2 seconds) {
 }
 ```
 
-#Outbound Mode
+# Outbound Mode
 
 This will bind to a host / port in your system and wait for connections coming from freeswitch. You can see for an example we have changing the type of the flow using the Incoming flow higer order function. This is optional in this mode an Inbound mode and needed only if you want to do some work on the messages before you send to the Sink. Youc an just as well use the same as the Inbound example here and push a Sink[FSMessage] to the 
 
