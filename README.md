@@ -67,3 +67,5 @@ OutboundServer("localhost", 8080, DefaultParser).startWith(
 
 
 ```
+
+I should credit https://github.com/danbarua/NEventSocket for some inspiration for this, I had used this library and found it useful in a .NET project and am taking sopme basic inspiration for design / structure from this. 
