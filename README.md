@@ -28,16 +28,7 @@ InboundServer("localhost", 8021, DefaultParser).connect("ClueCon", 2 seconds) {
     fsConnection.map {
       f =>          
         //f will give you the actual connection in the case it is succesful, here you can start calling commands
-         fsConnection.play("<play-file-path>")
-    }.onComplete {
-      //this onComplete is optional if you need to handle exceptions within the library code. 
-      //It can also be added to the Outbound mode sample if needed
-      case Success(f) => {
-        //f is of the type that the above map returns
-      }
-      case Failure(ex) => {
-        //here if there are any exceptions in handing the new connection or connection data
-      }
+         f.play("<play-file-path>")
     }
     Sink.foreach[List[FSMessage]](f => 
       //You need to return a Sink to handle a List[FSMessage] to fsConnection
@@ -45,7 +36,9 @@ InboundServer("localhost", 8021, DefaultParser).connect("ClueCon", 2 seconds) {
       //actors, into other streams, etc. Any feature of Akka Streams
     )
 }.onComplete {
-  f => println(f)
+  //you can use this onComplete for capturing the failure details such as Timeout or Invalid credentials for FreeSwitch 
+  case Failure(ex) => {    
+  }
 }
 ```
 
@@ -61,15 +54,14 @@ OutboundServer("localhost", 8080, DefaultParser).startWith(
       fsConnection.play("<play-file-path>")
       fsConnection.sendCommand("full command string")
       Sink.foreach[List[String]](println)
+      
+      //ToDo handle closed connection
     },
     incomingFlow => {
       incomingFlow.map { freeSwitchMessages =>
         //here you get a Flow[FSMessage] which you can work with and return a Flow of a different type as per 
         freeSwitchMessages.map(_.contentType)
       }
-    },
-    result => result onComplete {
-      case resultTry => println(s"Connection is closed ${resultTry}")
     }
   )
 
