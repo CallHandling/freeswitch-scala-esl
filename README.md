@@ -3,7 +3,7 @@ A reactive event socket library for FreeSwitch written using Scala and Akka Stre
 
 This library is intended to make the use of FreeSwitch easier for Scala developers. Once we complete we will consider implementing a custom esl module for freeswitch which implements akka streams back pressure to make the entire solution reactive. 
 
-To use this library we are proposing an insterface like this:-
+To use this library we are proposing an interface like this:-
 
 #Inbound Mode
 
