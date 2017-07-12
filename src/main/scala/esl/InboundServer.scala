@@ -18,17 +18,15 @@ package esl
 
 import akka.NotUsed
 import akka.actor.ActorSystem
-import akka.pattern.after
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{BidiFlow, Flow, Sink, Source, Tcp}
+import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
 import akka.util.ByteString
 import com.typesafe.config.Config
-import esl.domain.{CommandReply, ContentTypes, FSMessage}
+import esl.domain.FSMessage
 import esl.parser.Parser
 
 import scala.concurrent.duration._
-import scala.concurrent.{Future, Promise, _}
-import scala.util.{Failure, Success}
+import scala.concurrent.{Future, Promise}
 
 object InboundServer {
   val address = "freeswitch.inbound.address"
@@ -43,7 +41,8 @@ object InboundServer {
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(config: Config, parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer): InboundServer =
+  def apply(config: Config, parser: Parser)
+           (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): InboundServer =
     new InboundServer(config, parser)
 
   /**
@@ -56,7 +55,8 @@ object InboundServer {
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(interface: String, port: Int, parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer): InboundServer =
+  def apply(interface: String, port: Int, parser: Parser)
+           (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): InboundServer =
     new InboundServer(interface, port, parser)
 
   /**
@@ -67,14 +67,16 @@ object InboundServer {
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer): InboundServer =
+  def apply(parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): InboundServer =
     new InboundServer(interface = "localhost", port = 8021, parser)
 }
 
-class InboundServer(interface: String, port: Int, parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer) {
+class InboundServer(interface: String, port: Int, parser: Parser)
+                   (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) {
   implicit private val ec = system.dispatcher
 
-  def this(config: Config, parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer) =
+  def this(config: Config, parser: Parser)
+          (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) =
     this(config.getString(InboundServer.address), config.getInt(InboundServer.port), parser)
 
   /**
@@ -100,37 +102,16 @@ class InboundServer(interface: String, port: Int, parser: Parser)(implicit syste
     * The connect() function will authenticate client with freeswitch using given password. If freeswitch is not respond within given time then connection will timeout.
     *
     * @param password : String password for connection to freeswitch
-    * @param timeout  : FiniteDuration
     * @param fun      function will get freeswitch outbound connection after injecting sink
     * @return Future[(Any, Any)]
     */
-  def connect(password: String, timeout: FiniteDuration)(fun: Future[InboundFSConnection] => Sink[List[FSMessage], _]): Future[(Any, Any)] = {
-    var hasAuthenticated = false
+  def connect(password: String)(fun: Future[InboundFSConnection] => Sink[List[FSMessage], _]): Future[(Any, Any)] = {
     val fsConnection = InboundFSConnection(parser)
-    fsConnection.connect(password).map { _ =>
-      val fsConnectionPromise = Promise[InboundFSConnection]()
-      lazy val timeoutFuture = after(duration = timeout, using = system.scheduler) {
-        Future.failed(new TimeoutException(s"Inbound socket doesn't receive any response within $timeout time!"))
-      }
-      val fsConnectionFuture = Future.firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
-
-      val sink = Flow[List[FSMessage]].map { freeSwitchMessages =>
-        if (!hasAuthenticated) {
-          freeSwitchMessages.collectFirst {
-            case command: CommandReply => command
-          }.foreach { command =>
-            if (command.contentType == ContentTypes.commandReply && command.success) {
-              fsConnectionPromise.complete(Success(fsConnection))
-              hasAuthenticated = true
-            } else {
-              fsConnectionPromise.complete(Failure(new Exception(s"Inbound connection failed with socket: ${command.errorMessage}")))
-            }
-          }
-        }
-        freeSwitchMessages
-      }.to(fun(fsConnectionFuture))
-
+    fsConnection.connect(password).map { _ => println("Connecting")
+      val sink = fsConnection.init(Promise[InboundFSConnection](), fsConnection, fun, timeout)
       client(sink, fsConnection.handler())
     }
   }
+
+
 }

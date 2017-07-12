@@ -18,7 +18,8 @@ package esl
 
 import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, QueueOfferResult}
-import esl.domain.CallCommands.CommandAsString
+import esl.domain.CallCommands.{AuthCommand, CommandRequest, SubscribeMyEvents}
+import esl.domain.EventOutputFormats.{EventOutputFormat, Plain}
 import esl.parser.Parser
 
 import scala.concurrent.Future
@@ -34,6 +35,20 @@ case class InboundFSConnection(parser: Parser)(implicit actorSystem: ActorSystem
     * @param password : String
     * @return
     */
-  def connect(password: String): Future[QueueOfferResult] = queue.offer(CommandAsString(s"auth $password\n\n"))
+  override def connect(password: String): Future[QueueOfferResult] = queue.offer(AuthCommand(password))
 
+  /**
+    * Subscribe for `myevents` with `uuid`
+    * The 'myevents' subscription allows your inbound socket connection to behave like an outbound socket connect.
+    * It will "lock on" to the events for a particular uuid and will ignore all other events, closing the socket
+    * when the channel goes away or closing the channel when the socket disconnects and all applications have finished executing.
+    *
+    * @param uuid: String
+    * @param eventFormats: EventFormat it could be `plain`,`xml` or `json`
+    * @return CommandRequest
+    */
+  def subscribeEvents(uuid: String)(eventFormats: EventOutputFormat = Plain): CommandRequest = {
+    val command = SubscribeMyEvents(uuid, eventFormats)
+    CommandRequest(command, queue.offer(command))
+  }
 }

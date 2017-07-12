@@ -2,8 +2,9 @@ import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
 import esl.InboundServer
-import esl.domain.FSMessage
+import esl.domain.{EventNames, FSMessage}
 import esl.parser.DefaultParser
+
 import scala.concurrent.duration._
 
 
@@ -11,15 +12,19 @@ object InboundTest extends App {
   implicit val system = ActorSystem()
   implicit val mater = ActorMaterializer()
   implicit val ec = system.dispatcher
-
-  InboundServer("localhost", 8021, DefaultParser).connect("ClueCon", 2 seconds) {
+  implicit val timeout = Duration(5, SECONDS)
+  InboundServer("localhost", 8021, DefaultParser).connect("ClueCon") {
     fsConnection =>
-      fsConnection.map {
+      fsConnection.onComplete {
         f =>
-          println("Client authenticate successfully")
+          println("Client authenticate successfully"+f)
+        //f.subscribeEvents(EventNames.All)
       }
-      Sink.foreach[List[FSMessage]](f => println(f))
+      Sink.foreach[List[FSMessage]] {
+        fsMessages =>
+        // fs
+      }
   }.onComplete {
-    f => println(f)
+    f => println(":::"+f)
   }
 }

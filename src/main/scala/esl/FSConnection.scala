@@ -19,16 +19,22 @@ package esl
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
-import akka.stream.{ActorMaterializer, OverflowStrategy}
+import akka.stream.{ActorMaterializer, OverflowStrategy, QueueOfferResult}
 import akka.util.ByteString
 import esl.domain.CallCommands._
-import esl.domain._
+import domain.{ApplicationCommandConfig, _}
 import esl.parser.Parser
+import akka.pattern.after
+
+import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutException}
+import scala.concurrent.duration.FiniteDuration
+import scala.util.{Failure, Success}
 
 trait FSConnection {
   val parser: Parser
-  implicit val system: ActorSystem
-  implicit val materializer: ActorMaterializer
+  implicit protected val system: ActorSystem
+  implicit protected val materializer: ActorMaterializer
+  lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
   private[this] var unParsedBuffer = ""
   lazy val (queue, source) = Source.queue[FSCommand](50, OverflowStrategy.backpressure)
     .toMat(Sink.asPublisher(false))(Keep.both).run()
@@ -40,6 +46,7 @@ trait FSConnection {
   private[this] val incoming = Flow[ByteString].map { f =>
     val (messages, buffer) = parser.parse(unParsedBuffer + f.utf8String)
     unParsedBuffer = buffer
+    println("incoming:::"+messages)
     messages
   }
 
@@ -73,29 +80,58 @@ trait FSConnection {
     (Source.fromPublisher(source), BidiFlow.fromFlows(incoming, outgoing))
   }
 
-  def play(fileName: String): CommandRequest = {
-    val playFile = PlayFile(fileName)
+  def init[FS <: FSConnection, T](fsConnectionPromise: => Promise[FS],
+                                  fsConnection: FS,
+                                  fun: (Future[FS]) => Sink[List[T], _],
+                                  timeout: FiniteDuration): Sink[List[T], NotUsed] = {
+    var hasAuthenticated = false
+    lazy val timeoutFuture = after(duration = timeout, using = system.scheduler) {
+      Future.failed(new TimeoutException(s"Socket doesn't receive any response within $timeout."))
+    }
+    val fsConnectionFuture = Future.firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
+    Flow[List[T]].map { fsMessages =>
+      println(":::fsMessages:::" + fsMessages)
+      if (!hasAuthenticated) {
+        fsMessages.collectFirst {
+          case command: CommandReply => command
+        }.foreach { command =>
+          if (command.contentType == ContentTypes.commandReply && command.success) {
+            fsConnectionPromise.complete(Success(fsConnection))
+            hasAuthenticated = true
+          } else {
+            fsConnectionPromise.complete(Failure(new Exception(s"Socket failed to make connection with an error: ${command.errorMessage}")))
+          }
+        }
+      }
+      fsMessages
+    }.to(fun(fsConnectionFuture))
+  }
+
+  def connect(auth: String): Future[QueueOfferResult]
+
+  def play(fileName: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
+    val playFile = PlayFile(fileName, config)
     CommandRequest(playFile, queue.offer(playFile))
   }
 
-  def transfer(extension: String): CommandRequest = {
-    val transferTo = TransferTo(extension)
+  def transfer(extension: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
+    val transferTo = TransferTo(extension, config)
     CommandRequest(transferTo, queue.offer(transferTo))
   }
 
-  def hangup: CommandRequest = {
-    val hangup = Hangup()
+  def hangup(config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
+    val hangup = Hangup(config)
     CommandRequest(hangup, queue.offer(hangup))
   }
 
-  def break: CommandRequest = {
-    val break = Break()
+  def break(config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
+    val break = Break(config)
     CommandRequest(break, queue.offer(break))
   }
 
-  def send(command: FSCommand): CommandRequest = CommandRequest(command, queue.offer(command))
+  def sendCommand(command: FSCommand): CommandRequest = CommandRequest(command, queue.offer(command))
 
-  def send(command: String): CommandRequest = {
+  def sendCommand(command: String): CommandRequest = {
     val commandAsString = CommandAsString(command)
     CommandRequest(commandAsString, queue.offer(commandAsString))
   }

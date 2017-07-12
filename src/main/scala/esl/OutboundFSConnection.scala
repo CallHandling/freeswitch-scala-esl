@@ -16,12 +16,41 @@
 
 package esl
 
+import akka.Done
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
+import akka.stream.{ActorMaterializer, QueueOfferResult}
+import akka.stream.scaladsl.Sink
+import esl.domain.CallCommands.{AuthCommand, CommandRequest, SubscribeEvents}
+import esl.domain.EventNames.EventName
+import esl.domain.EventOutputFormats.{EventOutputFormat, Plain}
+import esl.domain.{EventMessage, FSMessage}
 import esl.parser.Parser
+
+import scala.concurrent.Future
 
 case class OutboundFSConnection(parser: Parser)(implicit actorSystem: ActorSystem, actorMaterializer: ActorMaterializer)
   extends FSConnection {
   override implicit val system: ActorSystem = actorSystem
   override implicit val materializer: ActorMaterializer = actorMaterializer
+
+  override def connect(password: String): Future[QueueOfferResult] = queue.offer(AuthCommand(password))
+  /**
+    * Enable or disable events by class or all (plain or xml or json output format)
+    *
+    * @param events       : EventName* specify any number of events
+    * @param eventFormats : EventFormat plain or xml or json output format
+    * @return CommandRequest
+    */
+  def subscribeEvents(events: EventName*)(eventFormats: EventOutputFormat = Plain): CommandRequest = {
+    val command = SubscribeEvents(events.toList, eventFormats)
+    CommandRequest(command, queue.offer(command))
+  }
+
+  def where(fun: EventMessage => Boolean)(handleEvents: EventMessage => Unit): Sink[List[FSMessage], Future[Done]] = {
+    Sink.foreach[List[FSMessage]] { fsMessages =>
+      fsMessages.collect {
+        case eventMsg: EventMessage if fun(eventMsg) => handleEvents(eventMsg)
+      }
+    }
+  }
 }

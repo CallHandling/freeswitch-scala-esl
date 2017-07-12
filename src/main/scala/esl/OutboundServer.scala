@@ -25,7 +25,8 @@ import com.typesafe.config.Config
 import esl.domain.FSMessage
 import esl.parser.Parser
 
-import scala.concurrent.Future
+import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{Future, Promise}
 
 object OutboundServer {
   val address = "freeswitch.outbound.address"
@@ -40,7 +41,8 @@ object OutboundServer {
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(config: Config, parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer): OutboundServer =
+  def apply(config: Config, parser: Parser)
+           (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): OutboundServer =
     new OutboundServer(config, parser)
 
   /**
@@ -53,15 +55,19 @@ object OutboundServer {
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(interface: String, port: Int, parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer): OutboundServer =
+  def apply(interface: String, port: Int, parser: Parser)
+           (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): OutboundServer =
     new OutboundServer(interface, port, parser)
 
 }
 
 
-class OutboundServer(address: String, port: Int, parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer) {
+class OutboundServer(address: String, port: Int, parser: Parser)
+                    (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) {
+  implicit private val ec = system.dispatcher
 
-  def this(config: Config, parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer) =
+  def this(config: Config, parser: Parser)
+          (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) =
     this(config.getString(OutboundServer.address), config.getInt(OutboundServer.port), parser)
 
   /** This function will start a tcp server with given Sink and flow. `FsConnection`'s helper functions allow you to send/push messages to the downstream.
@@ -72,8 +78,8 @@ class OutboundServer(address: String, port: Int, parser: Parser)(implicit system
     * @tparam T type of message transform from FreeSwitchMessage must materialize to the given sink.
     * @return The stream is completed successfully or not.
     */
-  def startWith[T](fun: FSConnection => Sink[T, _],
-                   flow: Flow[ByteString, List[FSMessage], _] => Flow[ByteString, T, _],
+  def startWith[T](fun: Future[OutboundFSConnection] => Sink[List[T], _],
+                   flow: Flow[ByteString, List[FSMessage], _] => Flow[ByteString, List[T], _],
                    onFsConnectionClosed: Future[Any] => Unit): Future[Done] =
     server(fun, fsConnection => fsConnection.handler(flow), onFsConnectionClosed)
 
@@ -84,7 +90,7 @@ class OutboundServer(address: String, port: Int, parser: Parser)(implicit system
     * @param onFsConnectionClosed this function will execute when Fs connection is closed.
     * @return The stream is completed successfully or not
     */
-  def startWith(fun: FSConnection => Sink[List[FSMessage], _],
+  def startWith(fun: Future[OutboundFSConnection] => Sink[List[FSMessage], _],
                 onFsConnectionClosed: Future[Any] => Unit): Future[Done] =
     server(fun, fsConnection => fsConnection.handler(), onFsConnectionClosed)
 
@@ -98,18 +104,20 @@ class OutboundServer(address: String, port: Int, parser: Parser)(implicit system
     * @tparam T2 type of data transform into ByteString
     * @return The stream is completed successfully or not
     */
-  private[this] def server[T1, T2](fun: FSConnection => Sink[T1, _],
-                                   flow: FSConnection => (Source[T2, _], BidiFlow[ByteString, T1, T2, ByteString, NotUsed]),
+  private[this] def server[T1, T2](fun: Future[OutboundFSConnection] => Sink[List[T1], _],
+                                   flow: OutboundFSConnection => (Source[T2, _], BidiFlow[ByteString, List[T1], T2, ByteString, NotUsed]),
                                    onFsConnectionClosed: Future[Any] => Unit): Future[Done] = {
     Tcp().bind(address, port).runForeach {
       connection =>
         val fsConnection = OutboundFSConnection(parser)
-        val sink = fun(fsConnection)
-        val (source, protocol) = flow(fsConnection)
-        val (_, closed: Future[Any]) = connection.flow
-          .join(protocol)
-          .runWith(source, sink)
-        onFsConnectionClosed(closed)
+        fsConnection.connect("myevents").map { _ =>
+          val sink = fsConnection.init(Promise[OutboundFSConnection](), fsConnection, fun, timeout)
+          val (source, protocol) = flow(fsConnection)
+          val (_, closed: Future[Any]) = connection.flow
+            .join(protocol)
+            .runWith(source, sink)
+          onFsConnectionClosed(closed)
+        }
     }
   }
 }

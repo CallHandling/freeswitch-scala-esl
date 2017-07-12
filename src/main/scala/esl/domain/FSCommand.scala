@@ -17,11 +17,14 @@
 package esl.domain
 
 import akka.stream.QueueOfferResult
+import esl.domain.EventOutputFormats.EventOutputFormat
+import esl.domain.EventNames.EventName
 
 import scala.concurrent.Future
 
+sealed trait FSCommand
 
-sealed trait FSCommand {
+sealed trait FSExecuteApp extends FSCommand {
   val config: ApplicationCommandConfig
   val eventUuid: String = java.util.UUID.randomUUID.toString
   val application: String
@@ -43,33 +46,68 @@ case class ApplicationCommandConfig(uuid: String = "", eventLock: Boolean = fals
 
 object CallCommands {
 
-  case class None(config: ApplicationCommandConfig = ApplicationCommandConfig()) extends FSCommand {
+  case class None(config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "none"
   }
 
-  case class Hangup(config: ApplicationCommandConfig = ApplicationCommandConfig()) extends FSCommand {
+  case class Hangup(config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "hangup"
   }
 
-  case class Break(config: ApplicationCommandConfig = ApplicationCommandConfig()) extends FSCommand {
+  case class Break(config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "break"
   }
 
-  case class PlayFile(filePath: String, config: ApplicationCommandConfig = ApplicationCommandConfig()) extends FSCommand {
+  case class PlayFile(filePath: String, config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "playback"
     override val args: String = filePath
   }
 
-  case class TransferTo(extension: String, config: ApplicationCommandConfig = ApplicationCommandConfig()) extends FSCommand {
+  case class TransferTo(extension: String, config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "transfer"
     override val args: String = extension
   }
 
-  case class CommandAsString(command: String) extends FSCommand {
-    override val application: String = "<none>"
-    override val config: ApplicationCommandConfig = ApplicationCommandConfig()
+  case class AuthCommand(password: String) extends FSCommand {
+    override def toString: String = s"auth $password\n\n"
+  }
 
+  case class ConnectCommand(auth: String) extends FSCommand{
+    override def toString: String = s"connect\n\n$auth\n\n"
+  }
+
+  case class CommandAsString(command: String) extends FSCommand {
     override def toString: String = command
+  }
+
+  /**
+    * The event command are used to subscribe on events from FreeSWITCH
+    * event plain ALL
+    * event plain CHANNEL_CREATE CHANNEL_DESTROY CUSTOM conference::maintenance sofia::register sofia::expire
+    * event xml ALL
+    * event json CHANNEL_ANSWER
+    *
+    * @param events       : List[EventName]
+    * @param eventFormats : EventOutputFormat it could be `plain`,`xml` or `json`
+    */
+  case class SubscribeEvents(events: List[EventName], eventFormats: EventOutputFormat) extends FSCommand {
+    override def toString: String = s"event ${eventFormats.name} ${events.map(_.name).mkString(" ")}"
+  }
+
+  /**
+    * The 'myevents' subscription allows your inbound socket connection to behave like an outbound socket connect.
+    * It will "lock on" to the events for a particular uuid and will ignore all other events
+    * myevents plain <uuid>
+    * myevents json <uuid>
+    * myevents xml <uuid>
+    * Once the socket connection has locked on to the events for this particular uuid it will NEVER see any events
+    * that are not related to the channel, even if subsequent event commands are sent
+    *
+    * @param uuid         : String
+    * @param eventFormats : EventOutputFormat `plain`,`xml` or `json`
+    */
+  case class SubscribeMyEvents(uuid: String, eventFormats: EventOutputFormat) extends FSCommand {
+    override def toString: String = s"myevents ${eventFormats.name} $uuid"
   }
 
   case class CommandRequest(command: FSCommand, queueOfferResult: Future[QueueOfferResult])
