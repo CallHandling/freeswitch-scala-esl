@@ -107,7 +107,7 @@ class InboundServer(interface: String, port: Int, parser: Parser)
     */
   def connect(password: String)(fun: Future[InboundFSConnection] => Sink[List[FSMessage], _]): Future[(Any, Any)] = {
     val fsConnection = InboundFSConnection(parser)
-    fsConnection.connect(password).map { _ => println("Connecting")
+    fsConnection.connect(password).map { _ =>
       val sink = fsConnection.init(Promise[InboundFSConnection](), fsConnection, fun, timeout)
       client(sink, fsConnection.handler())
     }

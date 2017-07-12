@@ -21,16 +21,9 @@ object OutboundTest extends App {
 
   OutboundServer("localhost", 8080, DefaultParser).startWith(
     fsConnection => {
-      /*fsConnection.subscribeEvents(ChannelAnswer)(Plain)
-      //fsConnection.play("<play-file-path>")
-      /* Sink.foreach[List[String]] { fsMessages =>
-         println(fsMessages)
-       }*/
-      fsConnection.where(_.eventName == Some(ChannelAnswer)) {
-        eventMessage =>
-          //play file with UUID
-          fsConnection.play("<play-file-path>", ApplicationCommandConfig(uuid = eventMessage.uuid.getOrElse("")))
-      }*/
+      fsConnection.onComplete{
+        case s=> println(":::::"+s)
+      }
       Sink.foreach[List[FSMessage]] { fsMessages =>
         println(fsMessages)
       }

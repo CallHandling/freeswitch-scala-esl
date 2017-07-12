@@ -40,18 +40,17 @@ trait FSConnection {
     .toMat(Sink.asPublisher(false))(Keep.both).run()
 
   /**
-    * It will parsed incoming packet into free switch messages. If there is an unparsed packet from last received packets
-    * will append to the next received packets. So we will get complete parsed packet.
+    * It will parsed incoming packet into free switch messages. If there is an unparsed packet from last received packets,
+    * will append to the next received packets. So we will get the complete parsed packet.
     */
   private[this] val incoming = Flow[ByteString].map { f =>
     val (messages, buffer) = parser.parse(unParsedBuffer + f.utf8String)
     unParsedBuffer = buffer
-    println("incoming:::"+messages)
     messages
   }
 
   /**
-    * It will convert free switch command into ByteString
+    * It will convert the freeswitch command into ByteString
     */
   private[this] val outgoing: Flow[FSCommand, ByteString, _] = Flow.fromFunction {
     freeSwitchCommand => ByteString(freeSwitchCommand.toString)
@@ -80,7 +79,19 @@ trait FSConnection {
     (Source.fromPublisher(source), BidiFlow.fromFlows(incoming, outgoing))
   }
 
-  def init[FS <: FSConnection, T](fsConnectionPromise: => Promise[FS],
+  /**
+    * This function will complete a given promise with Inbound/Outbound FS connection when it receive first command reply from freeswitch
+    * else it will timeout after given timeout
+    *
+    * @param fsConnectionPromise : Promise[FS] promise of FS connection, it will get completed when first command reply received
+    * @param fsConnection        FS type of freeswitch connection
+    * @param fun                 inject given sink by passing FS connection
+    * @param timeout             : FiniteDuration
+    * @tparam FS type of FS connection. it must be type of FSConnection
+    * @tparam T  type of freeswitch message
+    * @return Sink[List[T], NotUsed]
+    */
+  def init[FS <: FSConnection, T](fsConnectionPromise: Promise[FS],
                                   fsConnection: FS,
                                   fun: (Future[FS]) => Sink[List[T], _],
                                   timeout: FiniteDuration): Sink[List[T], NotUsed] = {
@@ -90,7 +101,6 @@ trait FSConnection {
     }
     val fsConnectionFuture = Future.firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
     Flow[List[T]].map { fsMessages =>
-      println(":::fsMessages:::" + fsMessages)
       if (!hasAuthenticated) {
         fsMessages.collectFirst {
           case command: CommandReply => command
@@ -109,28 +119,66 @@ trait FSConnection {
 
   def connect(auth: String): Future[QueueOfferResult]
 
+  /**
+    * This will publish the `play` command to freeswitch
+    *
+    * @param fileName : String name of the play file
+    * @param config   : ApplicationCommandConfig
+    * @return CommandRequest
+    */
   def play(fileName: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
     val playFile = PlayFile(fileName, config)
     CommandRequest(playFile, queue.offer(playFile))
   }
 
+  /**
+    * This will publish the `transfer` command to freeswitch
+    *
+    * @param extension : String
+    * @param config    : ApplicationCommandConfig command configuration
+    * @return CommandRequest
+    */
   def transfer(extension: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
     val transferTo = TransferTo(extension, config)
     CommandRequest(transferTo, queue.offer(transferTo))
   }
 
+  /**
+    * This will publish the `hangup` command to freeswitch
+    *
+    * @param config :ApplicationCommandConfig
+    * @return CommandRequest
+    */
   def hangup(config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
     val hangup = Hangup(config)
     CommandRequest(hangup, queue.offer(hangup))
   }
 
+  /**
+    * This will publish the `break` command to freeswitch
+    *
+    * @param config : ApplicationCommandConfig
+    * @return CommandRequest
+    */
   def break(config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
     val break = Break(config)
     CommandRequest(break, queue.offer(break))
   }
 
+  /**
+    * This will publish the FS command(play,transfer,break etc) to freeswitch
+    *
+    * @param command : FSCommand
+    * @return CommandRequest
+    */
   def sendCommand(command: FSCommand): CommandRequest = CommandRequest(command, queue.offer(command))
 
+  /**
+    * This will publish the string version of FS command to freeswitch
+    *
+    * @param command :String
+    * @return CommandRequest
+    */
   def sendCommand(command: String): CommandRequest = {
     val commandAsString = CommandAsString(command)
     CommandRequest(commandAsString, queue.offer(commandAsString))

@@ -27,13 +27,15 @@ trait FSMessage extends FSBridgeCommand {
 }
 
 case class BasicMessage(headers: Map[String, String], body: Option[String]) extends FSMessage {
-  val contentType: String = headers.lift(HeaderNames.contentType).fold("")(identity)
-  val contentLength: Int = headers.lift(HeaderNames.contentLength).fold(0)(_.toInt)
+  lazy val contentType: String = headers.lift(HeaderNames.contentType).fold("")(identity)
+  lazy val contentLength: Int = headers.lift(HeaderNames.contentLength).fold(0)(_.toInt)
   //ToDo: Implement toString
 }
 
 case class CommandReply(basicMessage: BasicMessage) extends FSMessage {
-  require(basicMessage.contentType != ContentTypes.commandReply, s"Expected content type command/reply, got ${basicMessage.contentType} instead.")
+
+  require(basicMessage.contentType == ContentTypes.commandReply, s"Expected content type command/reply, got ${basicMessage.contentType} instead.")
+
   override val headers: Map[String, String] = basicMessage.headers
   override val body: Option[String] = basicMessage.body
   override val contentLength: Int = basicMessage.contentLength

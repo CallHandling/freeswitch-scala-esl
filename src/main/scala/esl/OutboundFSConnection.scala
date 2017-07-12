@@ -20,7 +20,7 @@ import akka.Done
 import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, QueueOfferResult}
 import akka.stream.scaladsl.Sink
-import esl.domain.CallCommands.{AuthCommand, CommandRequest, SubscribeEvents}
+import esl.domain.CallCommands.{AuthCommand, CommandRequest, ConnectCommand, SubscribeEvents}
 import esl.domain.EventNames.EventName
 import esl.domain.EventOutputFormats.{EventOutputFormat, Plain}
 import esl.domain.{EventMessage, FSMessage}
@@ -33,7 +33,7 @@ case class OutboundFSConnection(parser: Parser)(implicit actorSystem: ActorSyste
   override implicit val system: ActorSystem = actorSystem
   override implicit val materializer: ActorMaterializer = actorMaterializer
 
-  override def connect(password: String): Future[QueueOfferResult] = queue.offer(AuthCommand(password))
+  override def connect(forEvents: String): Future[QueueOfferResult] = queue.offer(ConnectCommand(forEvents))
   /**
     * Enable or disable events by class or all (plain or xml or json output format)
     *
