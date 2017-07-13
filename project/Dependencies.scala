@@ -26,9 +26,14 @@ object Dependencies {
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaStreamV % Test
   )
 
+  val log = Seq(
+    "org.apache.logging.log4j" % "log4j-api" % log4jV,
+    "org.apache.logging.log4j" % "log4j-core" % log4jV
+  )
+
   val scalaTest = Seq(
     "org.scalatest" %% "scalatest" % scalaTestV % "test",
     "org.mockito" % "mockito-all" % mockitoV % "test",
-    "org.scalacheck" %% "scalacheck" % "1.13.4" % "test"
+    "org.scalacheck" %% "scalacheck" % scalaCheckV % "test"
   )
 }

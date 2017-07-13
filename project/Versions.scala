@@ -19,4 +19,5 @@ object Versions {
   val scalaTestV = "3.0.1"
   val scalaCheckV = "1.13.4"
   val mockitoV = "1.10.19"
+  val log4jV = "2.8.2"
 }
