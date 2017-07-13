@@ -17,7 +17,7 @@ package esl.domain
 
 object EventNames {
 
-  sealed trait EventName {
+  sealed trait EventName extends Product with Serializable {
     val name: String
   }
 

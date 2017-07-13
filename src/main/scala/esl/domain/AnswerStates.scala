@@ -18,7 +18,7 @@ package esl.domain
 
 object AnswerStates {
 
-  sealed trait AnswerState {
+  sealed trait AnswerState extends Product with Serializable {
     val name: String
   }
 

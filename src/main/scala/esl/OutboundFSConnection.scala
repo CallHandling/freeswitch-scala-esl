@@ -33,7 +33,7 @@ case class OutboundFSConnection(parser: Parser)(implicit actorSystem: ActorSyste
   override implicit val system: ActorSystem = actorSystem
   override implicit val materializer: ActorMaterializer = actorMaterializer
 
-  override def connect(forEvents: String): Future[QueueOfferResult] = queue.offer(ConnectCommand(forEvents))
+  override def connect(forMyEvents: String): Future[QueueOfferResult] = queue.offer(ConnectCommand(forMyEvents))
   /**
     * Enable or disable events by class or all (plain or xml or json output format)
     *

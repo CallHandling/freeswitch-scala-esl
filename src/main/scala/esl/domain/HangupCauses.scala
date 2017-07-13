@@ -21,7 +21,7 @@ object HangupCauses {
   /**
     * Standard telephony disconnect cause codes for ISDN
     */
-  sealed trait HangupCause {
+  sealed trait HangupCause extends Product with Serializable {
     val q850Code: Int
     val name: String
   }

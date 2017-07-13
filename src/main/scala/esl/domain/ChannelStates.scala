@@ -17,7 +17,7 @@ package esl.domain
 
 object ChannelStates {
 
-  sealed trait ChannelState {
+  sealed trait ChannelState extends Product with Serializable {
     val name: String
   }
 

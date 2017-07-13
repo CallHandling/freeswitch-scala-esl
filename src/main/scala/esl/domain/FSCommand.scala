@@ -72,8 +72,8 @@ object CallCommands {
     override def toString: String = s"auth $password\n\n"
   }
 
-  case class ConnectCommand(auth: String) extends FSCommand{
-    override def toString: String = s"connect\n\n$auth\n\n"
+  case class ConnectCommand(forMyEvents: String) extends FSCommand{
+    override def toString: String = s"connect\n\n$forMyEvents\n\n"
   }
 
   case class CommandAsString(command: String) extends FSCommand {

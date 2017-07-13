@@ -18,7 +18,7 @@ package esl.domain
 
 object EventOutputFormats {
 
-  sealed trait EventOutputFormat {
+  sealed trait EventOutputFormat extends Product with Serializable {
     val name: String
   }
 
