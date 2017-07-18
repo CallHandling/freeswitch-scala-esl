@@ -2,8 +2,7 @@ import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
 import esl.InboundServer
-import esl.domain.{EventNames, FSMessage}
-import esl.parser.DefaultParser
+import esl.domain.FSMessage
 
 import scala.concurrent.duration._
 
@@ -13,7 +12,7 @@ object InboundTest extends App {
   implicit val mater = ActorMaterializer()
   implicit val ec = system.dispatcher
   implicit val timeout = Duration(5, SECONDS)
-  InboundServer("localhost", 8021, DefaultParser).connect("ClueCon") {
+  InboundServer("localhost", 8021).connect("ClueCon") {
     fsConnection =>
       fsConnection.onComplete {
         f =>

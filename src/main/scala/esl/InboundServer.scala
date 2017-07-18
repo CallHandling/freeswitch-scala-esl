@@ -36,28 +36,26 @@ object InboundServer {
     * Create a inbound client for a given configuration and parser
     *
     * @param config       : Config this configuration must have `freeswitch.inbound.address` and `freeswitch.inbound.address`
-    * @param parser       : Parser This parser will parse any incoming message into Free switch messages
     * @param system       : ActorSystem
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(config: Config, parser: Parser)
+  def apply(config: Config)
            (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): InboundServer =
-    new InboundServer(config, parser)
+    new InboundServer(config)
 
   /**
     * This will create a InBound client for a given interface and port
     *
     * @param interface    : String name/ip address of the server
     * @param port         : Int port number of the server
-    * @param parser       : Parser it will parse any incoming packet into Free switch messages
     * @param system       : ActorSystem
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(interface: String, port: Int, parser: Parser)
+  def apply(interface: String, port: Int)
            (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): InboundServer =
-    new InboundServer(interface, port, parser)
+    new InboundServer(interface, port)
 
   /**
     * This will create a OutBound server for localhost's default free switch server
@@ -68,16 +66,16 @@ object InboundServer {
     * @return OutboundServer
     */
   def apply(parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): InboundServer =
-    new InboundServer(interface = "localhost", port = 8021, parser)
+    new InboundServer(interface = "localhost", port = 8021)
 }
 
-class InboundServer(interface: String, port: Int, parser: Parser)
+class InboundServer(interface: String, port: Int)
                    (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) {
   implicit private val ec = system.dispatcher
 
-  def this(config: Config, parser: Parser)
+  def this(config: Config)
           (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) =
-    this(config.getString(InboundServer.address), config.getInt(InboundServer.port), parser)
+    this(config.getString(InboundServer.address), config.getInt(InboundServer.port))
 
   /**
     * Open a client connection for given interface and port
@@ -106,7 +104,7 @@ class InboundServer(interface: String, port: Int, parser: Parser)
     * @return Future[(Any, Any)]
     */
   def connect(password: String)(fun: Future[InboundFSConnection] => Sink[List[FSMessage], _]): Future[(Any, Any)] = {
-    val fsConnection = InboundFSConnection(parser)
+    val fsConnection = InboundFSConnection()
     fsConnection.connect(password).map { _ =>
       val sink = fsConnection.init(Promise[InboundFSConnection](), fsConnection, fun, timeout)
       client(sink, fsConnection.handler())

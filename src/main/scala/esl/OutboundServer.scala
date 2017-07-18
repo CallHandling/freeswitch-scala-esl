@@ -18,15 +18,17 @@ package esl
 
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{BidiFlow, Flow, Sink, Source, Tcp}
+import akka.stream.scaladsl.Tcp.IncomingConnection
+import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
 import com.typesafe.config.Config
 import esl.domain.FSMessage
-import esl.parser.Parser
+import org.apache.logging.log4j.scala.Logging
 
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{Future, Promise}
+import scala.util.{Failure, Success}
 
 object OutboundServer {
   val address = "freeswitch.outbound.address"
@@ -36,54 +38,39 @@ object OutboundServer {
     * Create a OutBound server with given configuration and parser
     *
     * @param config       : Config this configuration must have `freeswitch.outbound.address` and `freeswitch.outbound.address`
-    * @param parser       : Parser This parser will parse any incoming message into Free switch messages
     * @param system       : ActorSystem
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(config: Config, parser: Parser)
+  def apply(config: Config)
            (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): OutboundServer =
-    new OutboundServer(config, parser)
+    new OutboundServer(config)
 
   /**
     * This will create a OutBound server for given interface and port
     *
     * @param interface    : String name/ip address of the server
     * @param port         : Int port number of the server
-    * @param parser       : Parser it will parse any incoming packet into Free switch messages
     * @param system       : ActorSystem
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(interface: String, port: Int, parser: Parser)
+  def apply(interface: String, port: Int)
            (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): OutboundServer =
-    new OutboundServer(interface, port, parser)
+    new OutboundServer(interface, port)
 
 }
 
 
-class OutboundServer(address: String, port: Int, parser: Parser)
-                    (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) {
+class OutboundServer(address: String, port: Int)
+                    (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) extends Logging {
   implicit private val ec = system.dispatcher
 
-  def this(config: Config, parser: Parser)
+  def this(config: Config)
           (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) =
-    this(config.getString(OutboundServer.address), config.getInt(OutboundServer.port), parser)
+    this(config.getString(OutboundServer.address), config.getInt(OutboundServer.port))
 
-  /** This function will start a tcp server with given Sink and flow. `FsConnection`'s helper functions allow you to send/push messages to the downstream.
-    *
-    * @param fun                  this function will receive Fs connection and any incoming message materialize to the given sink.
-    * @param flow                 this function will receive a FreeSwitchMessage and transform into `T` message.
-    * @param onFsConnectionClosed this will execute when Fs connection is closed.
-    * @tparam T type of message transform from FreeSwitchMessage must materialize to the given sink.
-    * @return The stream is completed successfully or not.
-    */
-  def startWith[T](fun: Future[OutboundFSConnection] => Sink[List[T], _],
-                   flow: Flow[ByteString, List[FSMessage], _] => Flow[ByteString, List[T], _],
-                   onFsConnectionClosed: Future[Any] => Unit): Future[Done] =
-    server(fun, fsConnection => fsConnection.handler(flow), onFsConnectionClosed)
-
-  /** This function will start a tcp server with given Sink. So any free switch messages materialize to given sink.
+  /** This function will start a tcp server with given Sink. any free switch messages materialize to given sink.
     * `FsConnection`'s helper function allow you to send/push message to downstream.
     *
     * @param fun                  this function will receive Fs connection and any incoming Free switch message materialize to the given sink.
@@ -91,7 +78,7 @@ class OutboundServer(address: String, port: Int, parser: Parser)
     * @return The stream is completed successfully or not
     */
   def startWith(fun: Future[OutboundFSConnection] => Sink[List[FSMessage], _],
-                onFsConnectionClosed: Future[Any] => Unit): Future[Done] =
+                onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] =
     server(fun, fsConnection => fsConnection.handler(), onFsConnectionClosed)
 
   /** This function will start a tcp server for given sink,source and flow.
@@ -100,23 +87,31 @@ class OutboundServer(address: String, port: Int, parser: Parser)
     * @param flow                 Source's element `T2` push to downstream
     *                             BidiFlow will transform incoming ByteString into `T1` type and outgoing `T2` into ByteString
     * @param onFsConnectionClosed this function will execute when Fs connection is closed
-    * @tparam T1 type of data transformed from ByteString
-    * @tparam T2 type of data transform into ByteString
+    * @tparam T type of data transform into ByteString
     * @return The stream is completed successfully or not
     */
-  private[this] def server[T1, T2](fun: Future[OutboundFSConnection] => Sink[List[T1], _],
-                                   flow: OutboundFSConnection => (Source[T2, _], BidiFlow[ByteString, List[T1], T2, ByteString, NotUsed]),
-                                   onFsConnectionClosed: Future[Any] => Unit): Future[Done] = {
+  private[this] def server[T](fun: Future[OutboundFSConnection] => Sink[List[FSMessage], _],
+                              flow: OutboundFSConnection => (Source[T, _], BidiFlow[ByteString, List[FSMessage], T, ByteString, NotUsed]),
+                              onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] = {
     Tcp().bind(address, port).runForeach {
       connection =>
-        val fsConnection = OutboundFSConnection(parser)
+        logger.info(s"Socket connection is opened for ${connection.remoteAddress}")
+        val fsConnection = OutboundFSConnection()
         fsConnection.connect("myevents").map { _ =>
           val sink = fsConnection.init(Promise[OutboundFSConnection](), fsConnection, fun, timeout)
           val (source, protocol) = flow(fsConnection)
           val (_, closed: Future[Any]) = connection.flow
             .join(protocol)
             .runWith(source, sink)
-          onFsConnectionClosed(closed)
+          val closedConn = closed.transform {
+            case Success(_) =>
+              logger.info(s"Socket connection has been closed successfully for ${connection.remoteAddress}")
+              Success(connection)
+            case Failure(ex) =>
+              logger.info(s"Socket connection failed to closed for ${connection.remoteAddress}")
+              Failure(ex)
+          }
+          onFsConnectionClosed(closedConn)
         }
     }
   }

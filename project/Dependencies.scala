@@ -26,14 +26,21 @@ object Dependencies {
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaStreamV % Test
   )
 
-  val log = Seq(
-    "org.apache.logging.log4j" % "log4j-api" % log4jV,
-    "org.apache.logging.log4j" % "log4j-core" % log4jV
-  )
+  lazy val log4j = Seq(
+    "log4j-api",
+    "log4j-core",
+    "log4j-slf4j-impl"
+  ).map {
+    "org.apache.logging.log4j" % _ % "2.8.2"
+  } ++
+    Seq(
+      "com.lmax" % "disruptor" % "3.3.6",
+      "org.apache.logging.log4j" %% "log4j-api-scala" % "11.0-SNAPSHOT"
+    )
 
   val scalaTest = Seq(
     "org.scalatest" %% "scalatest" % scalaTestV % "test",
     "org.mockito" % "mockito-all" % mockitoV % "test",
-    "org.scalacheck" %% "scalacheck" % scalaCheckV % "test"
+    "org.scalacheck" %% "scalacheck" % "1.13.4" % "test"
   )
 }

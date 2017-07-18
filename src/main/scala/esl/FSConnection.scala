@@ -18,24 +18,29 @@ package esl
 
 import akka.NotUsed
 import akka.actor.ActorSystem
+import akka.pattern.after
 import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
 import akka.stream.{ActorMaterializer, OverflowStrategy, QueueOfferResult}
 import akka.util.ByteString
 import esl.domain.CallCommands._
-import domain.{ApplicationCommandConfig, _}
-import esl.parser.Parser
-import akka.pattern.after
+import esl.domain.EventNames.EventName
+import esl.domain.{ApplicationCommandConfig, FSMessage, _}
+import esl.parser.DefaultParser
+import org.apache.logging.log4j.scala.Logging
 
+import scala.collection.mutable
+import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutException}
-import scala.concurrent.duration.FiniteDuration
 import scala.util.{Failure, Success}
 
-trait FSConnection {
-  val parser: Parser
+trait FSConnection extends Logging {
+  lazy val parser = DefaultParser
   implicit protected val system: ActorSystem
   implicit protected val materializer: ActorMaterializer
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
   private[this] var unParsedBuffer = ""
+  protected val bgapiMap: mutable.Map[String, Promise[CommandReply]] = mutable.Map.empty
+  val commandQueue: mutable.Queue[Promise[CommandReply]] = mutable.Queue.empty
   lazy val (queue, source) = Source.queue[FSCommand](50, OverflowStrategy.backpressure)
     .toMat(Sink.asPublisher(false))(Keep.both).run()
 
@@ -88,23 +93,24 @@ trait FSConnection {
     * @param fun                 inject given sink by passing FS connection
     * @param timeout             : FiniteDuration
     * @tparam FS type of FS connection. it must be type of FSConnection
-    * @tparam T  type of freeswitch message
     * @return Sink[List[T], NotUsed]
     */
-  def init[FS <: FSConnection, T](fsConnectionPromise: Promise[FS],
-                                  fsConnection: FS,
-                                  fun: (Future[FS]) => Sink[List[T], _],
-                                  timeout: FiniteDuration): Sink[List[T], NotUsed] = {
+  def init[FS <: FSConnection](fsConnectionPromise: Promise[FS],
+                               fsConnection: FS,
+                               fun: (Future[FS]) => Sink[List[FSMessage], _],
+                               timeout: FiniteDuration): Sink[List[FSMessage], NotUsed] = {
     var hasAuthenticated = false
     lazy val timeoutFuture = after(duration = timeout, using = system.scheduler) {
       Future.failed(new TimeoutException(s"Socket doesn't receive any response within $timeout."))
     }
     val fsConnectionFuture = Future.firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
-    Flow[List[T]].map { fsMessages =>
+    Flow[List[FSMessage]].map { fsMessages =>
+      //TODO Improvement
       if (!hasAuthenticated) {
-        fsMessages.collectFirst {
+        val commandReply = fsMessages.collectFirst {
           case command: CommandReply => command
-        }.foreach { command =>
+        }
+        commandReply.foreach { command =>
           if (command.contentType == ContentTypes.commandReply && command.success) {
             fsConnectionPromise.complete(Success(fsConnection))
             hasAuthenticated = true
@@ -113,11 +119,29 @@ trait FSConnection {
           }
         }
       }
+
+      fsMessages.collect {
+        case command: CommandReply => command
+      }.foreach {
+        cmdReply =>
+          val promise = commandQueue.dequeue()
+          if (cmdReply.success)
+            promise.tryComplete(Success(cmdReply))
+          else promise.tryComplete(Failure(new Exception(s"Failed to get success reply: ${cmdReply.errorMessage}")))
+      }
       fsMessages
     }.to(fun(fsConnectionFuture))
   }
 
   def connect(auth: String): Future[QueueOfferResult]
+
+  def publishCommand(command: FSCommand): Future[CommandReply] = {
+    queue.offer(command).flatMap { _ =>
+      val promise = Promise[CommandReply]()
+      commandQueue.enqueue(promise)
+      promise.future
+    }
+  }
 
   /**
     * This will publish the `play` command to freeswitch
@@ -126,10 +150,8 @@ trait FSConnection {
     * @param config   : ApplicationCommandConfig
     * @return CommandRequest
     */
-  def play(fileName: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
-    val playFile = PlayFile(fileName, config)
-    CommandRequest(playFile, queue.offer(playFile))
-  }
+  def play(fileName: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(PlayFile(fileName, config))
 
   /**
     * This will publish the `transfer` command to freeswitch
@@ -138,10 +160,8 @@ trait FSConnection {
     * @param config    : ApplicationCommandConfig command configuration
     * @return CommandRequest
     */
-  def transfer(extension: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
-    val transferTo = TransferTo(extension, config)
-    CommandRequest(transferTo, queue.offer(transferTo))
-  }
+  def transfer(extension: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(TransferTo(extension, config))
 
   /**
     * This will publish the `hangup` command to freeswitch
@@ -149,10 +169,8 @@ trait FSConnection {
     * @param config :ApplicationCommandConfig
     * @return CommandRequest
     */
-  def hangup(config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
-    val hangup = Hangup(config)
-    CommandRequest(hangup, queue.offer(hangup))
-  }
+  def hangup(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Hangup(config))
 
   /**
     * This will publish the `break` command to freeswitch
@@ -160,10 +178,8 @@ trait FSConnection {
     * @param config : ApplicationCommandConfig
     * @return CommandRequest
     */
-  def break(config: ApplicationCommandConfig = ApplicationCommandConfig()): CommandRequest = {
-    val break = Break(config)
-    CommandRequest(break, queue.offer(break))
-  }
+  def break(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Break(config))
 
   /**
     * This will publish the FS command(play,transfer,break etc) to freeswitch
@@ -171,7 +187,7 @@ trait FSConnection {
     * @param command : FSCommand
     * @return CommandRequest
     */
-  def sendCommand(command: FSCommand): CommandRequest = CommandRequest(command, queue.offer(command))
+  def sendCommand(command: FSCommand): Future[CommandReply] = publishCommand(command)
 
   /**
     * This will publish the string version of FS command to freeswitch
@@ -183,4 +199,102 @@ trait FSConnection {
     val commandAsString = CommandAsString(command)
     CommandRequest(commandAsString, queue.offer(commandAsString))
   }
+
+  /**
+    * filter
+    * Specify event types to listen for. Note, this is not a filter out but rather a "filter in,
+    * " that is, when a filter is applied only the filtered values are received. Multiple filters on a socket connection are allowed.
+    * Usage:
+    * filter <EventHeader> <ValueToFilter>
+    *
+    * @param events : Map[EventName, String] mapping of events and their value
+    * @param config : ApplicationCommandConfig
+    * @return
+    */
+  def filter(events: Map[EventName, String],
+             config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Filter(events, config))
+
+  /**
+    * filter delete
+    * Specify the events which you want to revoke the filter. filter delete can be used when some filters are applied wrongly or
+    * when there is no use of the filter.
+    * Usage:
+    * filter delete <EventHeader> <ValueToFilter>
+    *
+    * @param events :Map[EventName, String] mapping of events and their value
+    * @param config :ApplicationCommandConfig
+    * @return
+    */
+  def deleteFilter(events: Map[EventName, String],
+                   config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(DeleteFilter(events, config))
+
+  /**
+    * att_xfer <channel_url>
+    * Bridge a third party specified by channel_url onto the call, speak privately, then bridge original caller to target channel_url of att_xfer.
+    *
+    * @param destination   : String target channel_url of att_xfer
+    * @param conferenceKey : Char "attxfer_conf_key" - can be used to initiate a three way transfer (deafault '0')
+    * @param hangupKey     : Char "attxfer_hangup_key" - can be used to hangup the call after user wants to end his or her call (deafault '*')
+    * @param cancelKey     : Char "attxfer_cancel_key" - can be used to cancel a tranfer just like origination_cancel_key, but straight from the att_xfer code (deafault '#')
+    * @param config        : ApplicationCommandConfig
+    * @return
+    */
+  def attXfer(destination: String,
+              conferenceKey: Char = '0',
+              hangupKey: Char = '*',
+              cancelKey: Char = '#',
+              config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(AttXfer(destination, conferenceKey, hangupKey, cancelKey, config))
+
+  /**
+    * To dial multiple contacts all at once:
+    * <action application="bridge" data="sofia/internal/1010@sip.yourprovider.com,sofia/sip/1011@sip.yourprovider.com"/>
+    * To dial multiple contacts one at a time:
+    * <action application="bridge" data="sofia/internal/1010@sip.yourprovider.com|sofia/sip/1011@sip.yourprovider.com"/>
+    *
+    * @param targets  :List[String] list of an external SIP address or termination provider
+    * @param dialType : DialType To dial multiple contacts all at once then separate targets by comma(,) or To dial multiple contacts one at a time
+    *                 then separate targets by pipe(|)
+    * @param config   :ApplicationCommandConfig
+    * @return
+    */
+  def bridge(targets: List[String],
+             dialType: DialType,
+             config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Bridge(targets, dialType, config))
+
+  /**
+    * Allows one channel to bridge itself to the a or b leg of another call. The remaining leg of the original call gets hungup
+    * Usage: intercept [-bleg] <uuid>
+    *
+    * @param uuid   : String
+    * @param config :ApplicationCommandConfig
+    * @return
+    */
+  def intercept(uuid: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Intercept(uuid, config))
+
+  /**
+    * Read DTMF (touch-tone) digits.
+    * Usage
+    * read <min> <max> <sound file> <variable name> <timeout> <terminators>
+    *
+    * @param min          Minimum number of digits to fetch.
+    * @param max          Maximum number of digits to fetch.
+    * @param soundFile    Sound file to play before digits are fetched.
+    * @param variableName Channel variable that digits should be placed in.
+    * @param timeout      Number of milliseconds to wait on each digit
+    * @param terminators  Digits used to end input if less than <min> digits have been pressed. (Typically '#')
+    * @param config       ApplicationCommandConfig
+    */
+  def read(min: Int, max: Int)(soundFile: String,
+                               variableName: String,
+                               timeout: Duration,
+                               terminators: List[Char] = List('#'),
+                               config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Read(ReadParameters(min, max, soundFile, variableName, timeout, terminators), config))
+
+
 }

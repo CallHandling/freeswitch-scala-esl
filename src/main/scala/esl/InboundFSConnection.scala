@@ -18,13 +18,12 @@ package esl
 
 import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, QueueOfferResult}
-import esl.domain.CallCommands.{AuthCommand, CommandRequest, SubscribeMyEvents}
-import esl.domain.EventOutputFormats.{EventOutputFormat, Plain}
-import esl.parser.Parser
+import esl.domain.CallCommands.{AuthCommand, SubscribeMyEvents}
+import esl.domain.CommandReply
 
 import scala.concurrent.Future
 
-case class InboundFSConnection(parser: Parser)(implicit actorSystem: ActorSystem, actorMaterializer: ActorMaterializer)
+case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMaterializer: ActorMaterializer)
   extends FSConnection {
   override implicit val materializer: ActorMaterializer = actorMaterializer
   override implicit val system: ActorSystem = actorSystem
@@ -43,12 +42,8 @@ case class InboundFSConnection(parser: Parser)(implicit actorSystem: ActorSystem
     * It will "lock on" to the events for a particular uuid and will ignore all other events, closing the socket
     * when the channel goes away or closing the channel when the socket disconnects and all applications have finished executing.
     *
-    * @param uuid: String
-    * @param eventFormats: EventFormat it could be `plain`,`xml` or `json`
+    * @param uuid : String
     * @return CommandRequest
     */
-  def subscribeEvents(uuid: String)(eventFormats: EventOutputFormat = Plain): CommandRequest = {
-    val command = SubscribeMyEvents(uuid, eventFormats)
-    CommandRequest(command, queue.offer(command))
-  }
+  def subscribeEvents(uuid: String): Future[CommandReply] = publishCommand(SubscribeMyEvents(uuid))
 }

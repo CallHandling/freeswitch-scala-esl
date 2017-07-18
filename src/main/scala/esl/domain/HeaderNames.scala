@@ -23,6 +23,7 @@ object HeaderNames {
   val application = "Application"
   val applicationData = "Application-Data"
   val applicationResponse = "Application-Response"
+  val applicationUuid = "Application-UUID"
   val eventName = "Event-Name"
   val channelState = "Channel-State"
   val answerState = "Answer-State"
