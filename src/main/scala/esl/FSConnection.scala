@@ -19,8 +19,8 @@ package esl
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.pattern.after
-import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
-import akka.stream.{ActorMaterializer, OverflowStrategy, QueueOfferResult}
+import akka.stream.scaladsl.{BidiFlow, Broadcast, Flow, GraphDSL, Keep, Sink, Source, Zip}
+import akka.stream._
 import akka.util.ByteString
 import esl.domain.CallCommands._
 import esl.domain.EventNames.EventName
@@ -88,7 +88,7 @@ trait FSConnection extends Logging {
     * This function will complete a given promise with Inbound/Outbound FS connection when it receive first command reply from freeswitch
     * else it will timeout after given timeout
     *
-    * @param fsConnectionPromise : Promise[FS] promise of FS connection, it will get completed when first command reply received
+    * @param fsConnectionPromise : Promise[FS] promise of FS connection, it will get complete when first success command reply received
     * @param fsConnection        FS type of freeswitch connection
     * @param fun                 inject given sink by passing FS connection
     * @param timeout             : FiniteDuration
@@ -99,42 +99,53 @@ trait FSConnection extends Logging {
                                fsConnection: FS,
                                fun: (Future[FS]) => Sink[List[FSMessage], _],
                                timeout: FiniteDuration): Sink[List[FSMessage], NotUsed] = {
-    var hasAuthenticated = false
+    var hasConnected = false
     lazy val timeoutFuture = after(duration = timeout, using = system.scheduler) {
       Future.failed(new TimeoutException(s"Socket doesn't receive any response within $timeout."))
     }
     val fsConnectionFuture = Future.firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
-    Flow[List[FSMessage]].map { fsMessages =>
-      //TODO Improvement
-      if (!hasAuthenticated) {
-        val commandReply = fsMessages.collectFirst {
-          case command: CommandReply => command
-        }
-        commandReply.foreach { command =>
-          if (command.contentType == ContentTypes.commandReply && command.success) {
+    val connectToFS = (messages: List[FSMessage]) => {
+      messages.collectFirst {
+        case command: CommandReply =>
+          if (command.success) {
             fsConnectionPromise.complete(Success(fsConnection))
-            hasAuthenticated = true
+            hasConnected = true
           } else {
             fsConnectionPromise.complete(Failure(new Exception(s"Socket failed to make connection with an error: ${command.errorMessage}")))
           }
-        }
       }
-
-      fsMessages.collect {
-        case command: CommandReply => command
-      }.foreach {
-        cmdReply =>
-          val promise = commandQueue.dequeue()
-          if (cmdReply.success)
-            promise.tryComplete(Success(cmdReply))
-          else promise.tryComplete(Failure(new Exception(s"Failed to get success reply: ${cmdReply.errorMessage}")))
-      }
-      fsMessages
+      messages
+    }
+    Flow[List[FSMessage]].map { fsMessages =>
+      if (!hasConnected) connectToFS(fsMessages)
+      else fsMessages.map(handleFSMessage)
     }.to(fun(fsConnectionFuture))
   }
 
-  def connect(auth: String): Future[QueueOfferResult]
+  /**
+    * This function will dequeue an element from queue then complete a promise with command reply message
+    * @param fSMessage: FSMessage freeswitch message
+    * @return FSMessage
+    */
+  private def handleFSMessage(fSMessage: FSMessage): FSMessage = fSMessage match {
+    case cmdReply: CommandReply =>
+      if (commandQueue.nonEmpty) {
+        val promise = commandQueue.dequeue()
+        if (cmdReply.success)
+          promise.complete(Success(cmdReply))
+        else promise.complete(Failure(new Exception(s"Failed to get success reply: ${cmdReply.errorMessage}")))
+      }
+      cmdReply
+    case apiResponse: ApiResponse => apiResponse //TODO Will implement logic for handle an api response
+    case eventMessage: EventMessage => eventMessage //TODO Will implement logic for handle an event message
+    case basicMessage: BasicMessage => basicMessage //TODO Will implement logic for handle the basic message
+  }
 
+  /**
+    * publish FS command to freeswitch
+    * @param command: FSCommand freeswitch command
+    * @return
+    */
   def publishCommand(command: FSCommand): Future[CommandReply] = {
     queue.offer(command).flatMap { _ =>
       val promise = Promise[CommandReply]()

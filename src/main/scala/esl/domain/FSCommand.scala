@@ -117,8 +117,8 @@ object CallCommands {
     override val args: String = targets.mkString(dialType.separator)
   }
 
-  case class ConnectCommand(forMyEvents: String) extends FSCommand {
-    override def toString: String = s"connect\n\n$forMyEvents\n\n"
+  case object ConnectCommand extends FSCommand {
+    override def toString: String = s"connect\n\n"
   }
 
   /**

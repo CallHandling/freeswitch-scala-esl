@@ -29,7 +29,11 @@ case class OutboundFSConnection()(implicit actorSystem: ActorSystem, actorMateri
   override implicit val system: ActorSystem = actorSystem
   override implicit val materializer: ActorMaterializer = actorMaterializer
 
-  override def connect(forMyEvents: String): Future[QueueOfferResult] = queue.offer(ConnectCommand(forMyEvents))
+  /**
+    * Connect with freeswitch by sending `connect` command
+    * @return
+    */
+  def connect(): Future[QueueOfferResult] = queue.offer(ConnectCommand)
 
   /**
     * Enable or disable events by class or all (plain or xml or json output format)

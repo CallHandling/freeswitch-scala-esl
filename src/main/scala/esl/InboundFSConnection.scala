@@ -34,7 +34,7 @@ case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMateria
     * @param password : String
     * @return
     */
-  override def connect(password: String): Future[QueueOfferResult] = queue.offer(AuthCommand(password))
+  def connect(password: String): Future[QueueOfferResult] = queue.offer(AuthCommand(password))
 
   /**
     * Subscribe for `myevents` with `uuid`

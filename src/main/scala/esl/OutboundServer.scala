@@ -97,7 +97,7 @@ class OutboundServer(address: String, port: Int)
       connection =>
         logger.info(s"Socket connection is opened for ${connection.remoteAddress}")
         val fsConnection = OutboundFSConnection()
-        fsConnection.connect("myevents").map { _ =>
+        fsConnection.connect().map { _ =>
           val sink = fsConnection.init(Promise[OutboundFSConnection](), fsConnection, fun, timeout)
           val (source, protocol) = flow(fsConnection)
           val (_, closed: Future[Any]) = connection.flow
