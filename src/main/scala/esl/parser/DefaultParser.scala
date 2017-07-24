@@ -100,6 +100,9 @@ object DefaultParser extends Parser {
         case (t, Some(x), f) if !f && x.contentType == ContentTypes.eventPlain =>
           doParse(t, EventMessage(x) :: msgs)
         case (t, Some(x), f) if !f && x.contentType == ContentTypes.commandReply &&
+          x.headers.get(HeaderNames.eventName).exists(_ == EventNames.ChannelData.name) =>
+          doParse(t, CommandReply(x) :: msgs)
+        case (t, Some(x), f) if !f && x.contentType == ContentTypes.commandReply &&
           !x.headers.contains(HeaderNames.eventName) =>
           doParse(t, CommandReply(x) :: msgs)
         case (t, Some(x), _) =>

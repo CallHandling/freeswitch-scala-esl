@@ -35,13 +35,7 @@ case class OutboundFSConnection()(implicit actorSystem: ActorSystem, actorMateri
     */
   def connect(): Future[QueueOfferResult] = queue.offer(ConnectCommand)
 
-  /**
-    * Enable or disable events by class or all (plain or xml or json output format)
-    *
-    * @param events       : EventName* specify any number of events
-    * @return CommandRequest
-    */
-  def subscribeEvents(events: EventName*): Future[CommandReply] = publishCommand(SubscribeEvents(events.toList))
+
 }
 
 

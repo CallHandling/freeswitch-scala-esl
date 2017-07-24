@@ -35,15 +35,4 @@ case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMateria
     * @return
     */
   def connect(password: String): Future[QueueOfferResult] = queue.offer(AuthCommand(password))
-
-  /**
-    * Subscribe for `myevents` with `uuid`
-    * The 'myevents' subscription allows your inbound socket connection to behave like an outbound socket connect.
-    * It will "lock on" to the events for a particular uuid and will ignore all other events, closing the socket
-    * when the channel goes away or closing the channel when the socket disconnects and all applications have finished executing.
-    *
-    * @param uuid : String
-    * @return CommandRequest
-    */
-  def subscribeEvents(uuid: String): Future[CommandReply] = publishCommand(SubscribeMyEvents(uuid))
 }

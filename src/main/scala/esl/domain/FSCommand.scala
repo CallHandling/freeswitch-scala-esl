@@ -21,6 +21,7 @@ import esl.domain.EventNames.EventName
 
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
+import CallCommands.{MESSAGE_TERMINATOR, LINE_TERMINATOR}
 
 sealed trait FSCommand {
   val eventUuid: String = java.util.UUID.randomUUID.toString
@@ -33,11 +34,12 @@ sealed trait FSExecuteApp extends FSCommand {
 
   override def toString: String = {
     val b = StringBuilder.newBuilder
-    b.append(s"sendmsg ${config.uuid}\nEvent-UUID: $eventUuid\ncall-command: execute\nexecute-app-name: $application\n")
-    if (config.eventLock) b.append("event-lock: true\n")
-    if (config.loops > 1) b.append(s"loops: ${config.loops}\n")
-    if (config.async) b.append(s"async: ${config.async}\n")
-    if (args.length > 0) b.append(s"content-type: text/plain\ncontent-length: ${args.length}\n\n$args\n")
+    b.append(s"sendmsg ${config.uuid}${LINE_TERMINATOR}Event-UUID: $eventUuid$LINE_TERMINATOR")
+    b.append(s"call-command: execute${LINE_TERMINATOR}execute-app-name: $application$LINE_TERMINATOR")
+    if (config.eventLock) b.append(s"event-lock: true$LINE_TERMINATOR")
+    if (config.loops > 1) b.append(s"loops: ${config.loops}$LINE_TERMINATOR")
+    if (config.async) b.append(s"async: ${config.async}$LINE_TERMINATOR")
+    if (args.length > 0) b.append(s"content-type: text/plain${LINE_TERMINATOR}content-length: ${args.length}$MESSAGE_TERMINATOR$args$LINE_TERMINATOR")
     b.toString()
   }
 }
@@ -46,6 +48,9 @@ case class ApplicationCommandConfig(uuid: String = "", eventLock: Boolean = fals
                                     loops: Int = 1, async: Boolean = false)
 
 object CallCommands {
+
+  val MESSAGE_TERMINATOR = "\n\n"
+  val LINE_TERMINATOR = "\n"
 
   case class None(config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "none"
@@ -74,7 +79,7 @@ object CallCommands {
   }
 
   case class AuthCommand(password: String) extends FSCommand {
-    override def toString: String = s"auth $password\n\n"
+    override def toString: String = s"auth $password$MESSAGE_TERMINATOR"
   }
 
   case class SetVar(varName: String, varValue: String, config: ApplicationCommandConfig) extends FSExecuteApp {
@@ -118,7 +123,7 @@ object CallCommands {
   }
 
   case object ConnectCommand extends FSCommand {
-    override def toString: String = s"connect\n\n"
+    override def toString: String = s"connect$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -140,7 +145,7 @@ object CallCommands {
     * @param events : List[EventName]
     */
   case class SubscribeEvents(events: List[EventName]) extends FSCommand {
-    override def toString: String = s"event plain ${events.map(_.name).mkString(" ")}"
+    override def toString: String = s"event plain ${events.map(_.name).mkString(" ")}$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -155,7 +160,7 @@ object CallCommands {
     * @param uuid : String
     */
   case class SubscribeMyEvents(uuid: String) extends FSCommand {
-    override def toString: String = s"myevents plain $uuid"
+    override def toString: String = s"myevents plain $uuid$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -167,9 +172,8 @@ object CallCommands {
     * @param events : Map[EventName, String] mapping of events and their value
     * @param config : ApplicationCommandConfig
     */
-  case class Filter(events: Map[EventName, String], config: ApplicationCommandConfig) extends FSExecuteApp {
-    override val application: String = "filter"
-    override val args: String = events.map { case (key, value) => s"${key.name} $value" }.mkString(" ")
+  case class Filter(events: Map[EventName, String], config: ApplicationCommandConfig) extends FSCommand {
+    override def toString(): String = s"filter ${events.map { case (key, value) => s"$value ${key.name}" }.mkString(" ")}$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -182,9 +186,8 @@ object CallCommands {
     * @param events :Map[EventName, String] mapping of events and their value
     * @param config :ApplicationCommandConfig
     */
-  case class DeleteFilter(events: Map[EventName, String], config: ApplicationCommandConfig) extends FSExecuteApp {
-    override val application: String = "filter delete"
-    override val args: String = events.map { case (key, value) => s"${key.name} $value" }.mkString(" ")
+  case class DeleteFilter(events: Map[EventName, String], config: ApplicationCommandConfig) extends FSCommand {
+    override def toString(): String = s"filter delete ${events.map { case (key, value) => s"${key.name} $value" }.mkString(" ")}$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -222,7 +225,6 @@ object CallCommands {
       .mkString(" ")
   }
 
-  case class Phrase()
 }
 
 case class CommandRequest(command: FSCommand, queueOfferResult: Future[QueueOfferResult])

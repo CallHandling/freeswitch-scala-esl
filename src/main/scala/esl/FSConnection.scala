@@ -19,8 +19,8 @@ package esl
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.pattern.after
-import akka.stream.scaladsl.{BidiFlow, Broadcast, Flow, GraphDSL, Keep, Sink, Source, Zip}
 import akka.stream._
+import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
 import akka.util.ByteString
 import esl.domain.CallCommands._
 import esl.domain.EventNames.EventName
@@ -48,8 +48,9 @@ trait FSConnection extends Logging {
     * It will parsed incoming packet into free switch messages. If there is an unparsed packet from last received packets,
     * will append to the next received packets. So we will get the complete parsed packet.
     */
-  private[this] val incoming = Flow[ByteString].map { f =>
-    val (messages, buffer) = parser.parse(unParsedBuffer + f.utf8String)
+  private[this] val incoming = Flow[ByteString].map { data =>
+    logger.debug(s"Received data from FS:\n ${data.utf8String}")
+    val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
     unParsedBuffer = buffer
     messages
   }
@@ -58,7 +59,9 @@ trait FSConnection extends Logging {
     * It will convert the freeswitch command into ByteString
     */
   private[this] val outgoing: Flow[FSCommand, ByteString, _] = Flow.fromFunction {
-    freeSwitchCommand => ByteString(freeSwitchCommand.toString)
+    fsCommand =>
+      logger.debug(s"Sending command to FS: ${fsCommand.toString}")
+      ByteString(fsCommand.toString)
   }
 
   /**
@@ -107,7 +110,7 @@ trait FSConnection extends Logging {
     val connectToFS = (messages: List[FSMessage]) => {
       messages.collectFirst {
         case command: CommandReply =>
-          if (command.success) {
+          if (command.success || true) {
             fsConnectionPromise.complete(Success(fsConnection))
             hasConnected = true
           } else {
@@ -222,7 +225,7 @@ trait FSConnection extends Logging {
     * @param config : ApplicationCommandConfig
     * @return
     */
-  def filter(events: Map[EventName, String],
+  def filter(events: Map[EventName,String],
              config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
     publishCommand(Filter(events, config))
 
@@ -307,5 +310,22 @@ trait FSConnection extends Logging {
                                config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
     publishCommand(Read(ReadParameters(min, max, soundFile, variableName, timeout, terminators), config))
 
+  /**
+    * Subscribe for `myevents` with `uuid`
+    * The 'myevents' subscription allows your inbound socket connection to behave like an outbound socket connect.
+    * It will "lock on" to the events for a particular uuid and will ignore all other events, closing the socket
+    * when the channel goes away or closing the channel when the socket disconnects and all applications have finished executing.
+    * For outbound, no need to send UUID. FS already knows the uuid of call so it automatically uses that
+    * @param uuid : String
+    * @return Future[CommandReply
+    */
+  def subscribeMyEvents(uuid: String = ""): Future[CommandReply] = publishCommand(SubscribeMyEvents(uuid))
 
+  /**
+    * Enable or disable events by class or all (plain or xml or json output format). Currently we are supporting plain events
+    *
+    * @param events       : EventName* specify any number of events
+    * @return Future[CommandReply
+    */
+  def subscribeEvents(events: EventName*): Future[CommandReply] = publishCommand(SubscribeEvents(events.toList))
 }
