@@ -337,9 +337,9 @@ object CallCommands {
     * Send DTMF digits from the session using the method(s) configured on the endpoint in use
     * If no duration is specified the default DTMF length of 2000ms will be used.
     *
-    * @param dtmfDigits : String DTMF digits
-    * @param toneDuration
-    * @param config
+    * @param dtmfDigits   : String DTMF digits
+    * @param toneDuration : Option[Duration]
+    * @param config       : ApplicationCommandConfig
     */
   case class SendDtmf(dtmfDigits: String,
                       toneDuration: Option[Duration],
@@ -370,7 +370,7 @@ object CallCommands {
     * Park is quite literally a way to put a call in limbo until you you bridge/uuid_bridge or transfer/uuid_transfer it.
     * Note that the park application takes no arguments, so the data attribute can be omitted in the definition.
     *
-    * @param config: ApplicationCommandConfig
+    * @param config : ApplicationCommandConfig
     */
   case class Park(config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "park"
@@ -380,9 +380,23 @@ object CallCommands {
 
 case class CommandRequest(command: FSCommand, queueOfferResult: Future[QueueOfferResult])
 
-case class DialType(separator: String) extends AnyVal
+sealed trait DialType extends Product with Serializable {
+  val separator: String
+}
 
-trait TimeUnit
+/**
+  * To dial multiple contacts all at once then separate targets by comma(,)
+  */
+case object AllAtOnce extends DialType {
+  override val separator: String = ","
+}
+
+/**
+  * To dial multiple contacts one at a time then separate targets by pipe(|)
+  */
+case object OneAtATime extends DialType {
+  override val separator: String = "|"
+}
 
 
 /**
