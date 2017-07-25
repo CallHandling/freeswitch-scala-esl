@@ -24,6 +24,7 @@ import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
 import akka.util.ByteString
 import esl.domain.CallCommands._
 import esl.domain.EventNames.EventName
+import esl.domain.HangupCauses.HangupCause
 import esl.domain.{ApplicationCommandConfig, FSMessage, _}
 import esl.parser.DefaultParser
 import org.apache.logging.log4j.scala.Logging
@@ -56,11 +57,11 @@ trait FSConnection extends Logging {
   }
 
   /**
-    * It will convert the freeswitch command into ByteString
+    * It will convert the FS command into ByteString
     */
   private[this] val outgoing: Flow[FSCommand, ByteString, _] = Flow.fromFunction {
     fsCommand =>
-      logger.debug(s"Sending command to FS: ${fsCommand.toString}")
+      logger.info(s"Sending command to FS: ${fsCommand.toString}")
       ByteString(fsCommand.toString)
   }
 
@@ -127,7 +128,8 @@ trait FSConnection extends Logging {
 
   /**
     * This function will dequeue an element from queue then complete a promise with command reply message
-    * @param fSMessage: FSMessage freeswitch message
+    *
+    * @param fSMessage : FSMessage FS message
     * @return FSMessage
     */
   private def handleFSMessage(fSMessage: FSMessage): FSMessage = fSMessage match {
@@ -145,9 +147,10 @@ trait FSConnection extends Logging {
   }
 
   /**
-    * publish FS command to freeswitch
-    * @param command: FSCommand freeswitch command
-    * @return
+    * publish FS command to FS
+    *
+    * @param command : FSCommand FS command
+    * @return Future[CommandReply]
     */
   def publishCommand(command: FSCommand): Future[CommandReply] = {
     queue.offer(command).flatMap { _ =>
@@ -158,61 +161,74 @@ trait FSConnection extends Logging {
   }
 
   /**
-    * This will publish the `play` command to freeswitch
+    * This will publish the `play` command to FS
     *
     * @param fileName : String name of the play file
     * @param config   : ApplicationCommandConfig
-    * @return CommandRequest
+    * @return Future[CommandReply]
     */
   def play(fileName: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
     publishCommand(PlayFile(fileName, config))
 
   /**
-    * This will publish the `transfer` command to freeswitch
+    * Immediately transfer the calling channel to a new context. If there happens to be an xml extension named <destination_number>
+    * then control is "warped" directly to that extension. Otherwise it goes through the entire context checking for a match.
     *
-    * @param extension : String
-    * @param config    : ApplicationCommandConfig command configuration
-    * @return CommandRequest
+    * @param extension : String extension name
+    * @param config    : ApplicationCommandConfig
+    * @return Future[CommandReply]
     */
   def transfer(extension: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
     publishCommand(TransferTo(extension, config))
 
   /**
-    * This will publish the `hangup` command to freeswitch
+    * Hangs up a channel, with an optional cause code supplied.
+    * Usage: <action application="hangup" data="USER_BUSY"/>
     *
+    * @param cause  : HangupCause
     * @param config :ApplicationCommandConfig
-    * @return CommandRequest
+    * @return Future[CommandReply]
     */
-  def hangup(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
-    publishCommand(Hangup(config))
+  def hangup(cause: HangupCause, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Hangup(cause, config))
 
   /**
-    * This will publish the `break` command to freeswitch
+    * Cancel an application currently running on the channel.Dialplan execution proceeds to the next application.
+    * Optionally clears all unprocessed events (queued applications) on the channel.
     *
     * @param config : ApplicationCommandConfig
-    * @return CommandRequest
+    * @return Future[CommandReply]
     */
   def break(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
     publishCommand(Break(config))
 
   /**
-    * This will publish the FS command(play,transfer,break etc) to freeswitch
+    * Answer the call for a channel.This sets up duplex audio between the calling ''A'' leg and the FreeSwitch server.
+    * It is not about other endpoints. The server might need to 'answer' a call to play an audio file or to receive DTMF from the call.
+    * Once answered, calls can still be bridged to other extensions. Because a bridge after an answer is actually a transfer,
+    * the ringback tones sent to the caller will be defined by transfer_ringback.
+    *
+    * @param config : ApplicationCommandConfig
+    * @return Future[CommandReply]
+    */
+  def answer(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Answer(config))
+
+  /**
+    * This will publish the FS command(play,transfer,break etc) to FS
     *
     * @param command : FSCommand
-    * @return CommandRequest
+    * @return Future[CommandReply]
     */
   def sendCommand(command: FSCommand): Future[CommandReply] = publishCommand(command)
 
   /**
-    * This will publish the string version of FS command to freeswitch
+    * This will publish the string version of FS command to FS
     *
     * @param command :String
-    * @return CommandRequest
+    * @return Future[CommandReply]
     */
-  def sendCommand(command: String): CommandRequest = {
-    val commandAsString = CommandAsString(command)
-    CommandRequest(commandAsString, queue.offer(commandAsString))
-  }
+  def sendCommand(command: String): Future[CommandReply] = publishCommand(CommandAsString(command))
 
   /**
     * filter
@@ -223,9 +239,9 @@ trait FSConnection extends Logging {
     *
     * @param events : Map[EventName, String] mapping of events and their value
     * @param config : ApplicationCommandConfig
-    * @return
+    * @return Future[CommandReply]
     */
-  def filter(events: Map[EventName,String],
+  def filter(events: Map[EventName, String],
              config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
     publishCommand(Filter(events, config))
 
@@ -238,7 +254,7 @@ trait FSConnection extends Logging {
     *
     * @param events :Map[EventName, String] mapping of events and their value
     * @param config :ApplicationCommandConfig
-    * @return
+    * @return Future[CommandReply]
     */
   def deleteFilter(events: Map[EventName, String],
                    config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
@@ -253,7 +269,7 @@ trait FSConnection extends Logging {
     * @param hangupKey     : Char "attxfer_hangup_key" - can be used to hangup the call after user wants to end his or her call (deafault '*')
     * @param cancelKey     : Char "attxfer_cancel_key" - can be used to cancel a tranfer just like origination_cancel_key, but straight from the att_xfer code (deafault '#')
     * @param config        : ApplicationCommandConfig
-    * @return
+    * @return Future[CommandReply]
     */
   def attXfer(destination: String,
               conferenceKey: Char = '0',
@@ -272,7 +288,7 @@ trait FSConnection extends Logging {
     * @param dialType : DialType To dial multiple contacts all at once then separate targets by comma(,) or To dial multiple contacts one at a time
     *                 then separate targets by pipe(|)
     * @param config   :ApplicationCommandConfig
-    * @return
+    * @return Future[CommandReply]
     */
   def bridge(targets: List[String],
              dialType: DialType,
@@ -285,7 +301,7 @@ trait FSConnection extends Logging {
     *
     * @param uuid   : String
     * @param config :ApplicationCommandConfig
-    * @return
+    * @return Future[CommandReply]
     */
   def intercept(uuid: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
     publishCommand(Intercept(uuid, config))
@@ -302,6 +318,7 @@ trait FSConnection extends Logging {
     * @param timeout      Number of milliseconds to wait on each digit
     * @param terminators  Digits used to end input if less than <min> digits have been pressed. (Typically '#')
     * @param config       ApplicationCommandConfig
+    * @return Future[CommandReply]
     */
   def read(min: Int, max: Int)(soundFile: String,
                                variableName: String,
@@ -316,6 +333,7 @@ trait FSConnection extends Logging {
     * It will "lock on" to the events for a particular uuid and will ignore all other events, closing the socket
     * when the channel goes away or closing the channel when the socket disconnects and all applications have finished executing.
     * For outbound, no need to send UUID. FS already knows the uuid of call so it automatically uses that
+    *
     * @param uuid : String
     * @return Future[CommandReply
     */
@@ -324,8 +342,129 @@ trait FSConnection extends Logging {
   /**
     * Enable or disable events by class or all (plain or xml or json output format). Currently we are supporting plain events
     *
-    * @param events       : EventName* specify any number of events
+    * @param events : EventName* specify any number of events
     * @return Future[CommandReply
     */
   def subscribeEvents(events: EventName*): Future[CommandReply] = publishCommand(SubscribeEvents(events.toList))
+
+  /**
+    * Speak a phrase of text using a predefined phrase macro
+    *
+    * @param variableName : String variable name
+    * @param config       : ApplicationCommandConfig
+    * @return Future[CommandReply]
+    */
+  def phrase(variableName: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Phrase(variableName, config))
+
+  /**
+    * Pause the channel for a given number of milliseconds, consuming the audio for that period of time.
+    * Calling sleep also will consume any outstanding RTP on the operating system's input queue,
+    * which can be very useful in situations where audio becomes backlogged.
+    * To consume DTMFs, use the sleep_eat_digits variable.
+    * Usage: <action application="sleep" data=<milliseconds>/>
+    *
+    * @param numberOfMillis : Duration duration must be in milliseconds
+    * @param config         : ApplicationCommandConfig
+    * @return Future[CommandReply]
+    */
+  def sleep(numberOfMillis: Duration, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Sleep(numberOfMillis, config))
+
+  /**
+    * Set a channel variable for the channel calling the application.
+    * Usage set <channel_variable>=<value>
+    *
+    * @param varName  : String variable name
+    * @param varValue : String variable value
+    * @param config   : ApplicationCommandConfig
+    * @return Future[CommandReply]
+    */
+  def setVar(varName: String, varValue: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(SetVar(varName, varValue, config))
+
+  /**
+    * pre_answer establishes media (early media) but does not answer.
+    *
+    * @param config : ApplicationCommandConfig
+    * @return Future[CommandReply]
+    */
+  def preAnswer(config: ApplicationCommandConfig): Future[CommandReply] =
+    publishCommand(PreAnswer(config))
+
+  /**
+    * Record to a file from the channel's input media stream
+    * Record is used to record voice messages, such as in a voicemail system. This application will record to a file specified by <path>.
+    * After recording stops the record app sets the following read-only variables:
+    *
+    * record_ms — duration of most recently recorded file in milliseconds
+    * record_samples — number of recorded samples
+    * playback_terminator_used — TouchTone digit used to terminate recording
+    *
+    * @param filePath      : String An application will record to a file specified by file path.
+    * @param timeLimitSecs : Duration it is the maximum duration of the recording in seconds
+    * @param silenceThresh : Duration it is an energy level below which is considered silence.
+    * @param silenceHits   : Duration it is how many seconds of audio below silence_thresh will be tolerated before the recording stops.
+    *                      When omitted, the default value is 3 seconds
+    * @param config        :ApplicationCommandConfig
+    * @return Future[CommandReply]
+    */
+  def record(filePath: String,
+             timeLimitSecs: Duration,
+             silenceThresh: Duration,
+             silenceHits: Option[Duration] = Option.empty,
+             config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Record(filePath, timeLimitSecs, silenceThresh, silenceHits, config))
+
+  /**
+    * Records an entire phone call or session.
+    * Multiple media bugs can be placed on the same channel.
+    *
+    * @param fileFormat : String file format like gsm,mp3,wav, ogg, etc
+    * @param config     : ApplicationCommandConfig
+    * @return Future[CommandReply]
+    */
+  def recordSession(fileFormat: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(RecordSession(fileFormat, config))
+
+  /**
+    * Send DTMF digits from the session using the method(s) configured on the endpoint in use
+    * If no duration is specified the default DTMF length of 2000ms will be used.
+    *
+    * @param dtmfDigits   : String DTMF digits
+    * @param toneDuration : Option[Duration] default is empty
+    * @param config       : ApplicationCommandConfig
+    * @return Future[CommandReply]
+    */
+  def sendDtmf(dtmfDigits: String,
+               toneDuration: Option[Duration] = Option.empty,
+               config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(SendDtmf(dtmfDigits, toneDuration, config))
+
+  /**
+    * Stop record session.
+    * Usage: <action application="stop_record_session" data="path"/>
+    *
+    * @param filePath : String file name
+    * @param config   : ApplicationCommandConfig
+    * @return Future[CommandReply]
+    */
+  def stopRecordSession(filePath: String,
+                        config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(StopRecordSession(filePath, config))
+
+  /**
+    * Places a channel "on hold" in the switch, instead of in the phone. Allows for a number of different options, including:
+    * Set caller in a place where the channel won't be hungup on, while waiting for someone to talk to.
+    * Generic "hold" mechanism, where you transfer a caller to it.
+    * Please note that to retrieve a call that has been "parked", you'll have to bridge to them or transfer the call to a valid location.
+    * Also, remember that parking a call does NOT supply music on hold or any other media.
+    * Park is quite literally a way to put a call in limbo until you you bridge/uuid_bridge or transfer/uuid_transfer it.
+    * Note that the park application takes no arguments, so the data attribute can be omitted in the definition.
+    *
+    * @param config : ApplicationCommandConfig
+    * @return Future[CommandReply]
+    */
+  def park(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+    publishCommand(Park(config))
 }

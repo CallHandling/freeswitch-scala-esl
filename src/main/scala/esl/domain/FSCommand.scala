@@ -21,7 +21,8 @@ import esl.domain.EventNames.EventName
 
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
-import CallCommands.{MESSAGE_TERMINATOR, LINE_TERMINATOR}
+import CallCommands.{LINE_TERMINATOR, MESSAGE_TERMINATOR}
+import esl.domain.HangupCauses.HangupCause
 
 sealed trait FSCommand {
   val eventUuid: String = java.util.UUID.randomUUID.toString
@@ -30,7 +31,7 @@ sealed trait FSCommand {
 sealed trait FSExecuteApp extends FSCommand {
   val config: ApplicationCommandConfig
   val application: String
-  val args = ""
+  val args: String = ""
 
   override def toString: String = {
     val b = StringBuilder.newBuilder
@@ -56,24 +57,53 @@ object CallCommands {
     override val application: String = "none"
   }
 
-  case class Hangup(config: ApplicationCommandConfig) extends FSExecuteApp {
+  /**
+    * Hangs up a channel, with an optional cause code supplied.
+    * <action application="hangup" data="USER_BUSY"/>
+    *
+    * @param cause  : HangupCause
+    * @param config : ApplicationCommandConfig
+    */
+  case class Hangup(cause: HangupCause, config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "hangup"
+    override val args: String = cause.name
   }
 
   case class Break(config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "break"
   }
 
+  /**
+    * Plays a sound file on the current channel.
+    *
+    * @param filePath : String file path that you want to play
+    * @param config   : ApplicationCommandConfig
+    */
   case class PlayFile(filePath: String, config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "playback"
     override val args: String = filePath
   }
 
+  /**
+    * Immediately transfer the calling channel to a new context. If there happens to be an xml extension named <destination_number>
+    * then control is "warped" directly to that extension. Otherwise it goes through the entire context checking for a match.
+    *
+    * @param extension : String extension name
+    * @param config    : ApplicationCommandConfig
+    */
   case class TransferTo(extension: String, config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "transfer"
     override val args: String = extension
   }
 
+  /**
+    * Answer the call for a channel.This sets up duplex audio between the calling ''A'' leg and the FreeSwitch server.
+    * It is not about other endpoints. The server might need to 'answer' a call to play an audio file or to receive DTMF from the call.
+    * Once answered, calls can still be bridged to other extensions. Because a bridge after an answer is actually a transfer,
+    * the ringback tones sent to the caller will be defined by transfer_ringback.
+    *
+    * @param config : ApplicationCommandConfig
+    */
   case class Answer(config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "answer"
   }
@@ -82,6 +112,15 @@ object CallCommands {
     override def toString: String = s"auth $password$MESSAGE_TERMINATOR"
   }
 
+  /**
+    * Set a channel variable for the channel calling the application.
+    * Usage set <channel_variable>=<value>
+    *
+    * @param varName  : String variable name
+    * @param varValue : String variable value
+    * @param config   : ApplicationCommandConfig
+    * @return Future[CommandReply]
+    */
   case class SetVar(varName: String, varValue: String, config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "set"
     override val args: String = s"$varName=$varValue"
@@ -173,7 +212,7 @@ object CallCommands {
     * @param config : ApplicationCommandConfig
     */
   case class Filter(events: Map[EventName, String], config: ApplicationCommandConfig) extends FSCommand {
-    override def toString(): String = s"filter ${events.map { case (key, value) => s"$value ${key.name}" }.mkString(" ")}$MESSAGE_TERMINATOR"
+    override def toString: String = s"filter ${events.map { case (key, value) => s"$value ${key.name}" }.mkString(" ")}$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -187,7 +226,7 @@ object CallCommands {
     * @param config :ApplicationCommandConfig
     */
   case class DeleteFilter(events: Map[EventName, String], config: ApplicationCommandConfig) extends FSCommand {
-    override def toString(): String = s"filter delete ${events.map { case (key, value) => s"${key.name} $value" }.mkString(" ")}$MESSAGE_TERMINATOR"
+    override def toString: String = s"filter delete ${events.map { case (key, value) => s"${key.name} $value" }.mkString(" ")}$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -225,11 +264,126 @@ object CallCommands {
       .mkString(" ")
   }
 
+  /**
+    * Speak a phrase of text using a predefined phrase macro
+    *
+    * @param variableName : String variable name
+    * @param config       : ApplicationCommandConfig
+    */
+  case class Phrase(variableName: String, config: ApplicationCommandConfig) extends FSExecuteApp {
+    override val application: String = "phrase"
+    override val args: String = "spell,${" + variableName + "}"
+  }
+
+  /**
+    * Pause the channel for a given number of milliseconds, consuming the audio for that period of time.
+    * Calling sleep also will consume any outstanding RTP on the operating system's input queue,
+    * which can be very useful in situations where audio becomes backlogged.
+    * To consume DTMFs, use the sleep_eat_digits variable.
+    * Usage: <action application="sleep" data=<milliseconds>/>
+    */
+  case class Sleep(numberOfMillis: Duration, config: ApplicationCommandConfig) extends FSExecuteApp {
+    override val application: String = "sleep"
+    override val args: String = numberOfMillis.toMillis.toString
+  }
+
+  /**
+    * pre_answer establishes media (early media) but does not answer.
+    *
+    * @param config : ApplicationCommandConfig
+    */
+  case class PreAnswer(config: ApplicationCommandConfig) extends FSExecuteApp {
+    override val application: String = "pre_answer"
+  }
+
+  /**
+    * Record to a file from the channel's input media stream
+    * Record is used to record voice messages, such as in a voicemail system. This application will record to a file specified by <path>.
+    * After recording stops the record app sets the following read-only variables:
+    *
+    * record_ms — duration of most recently recorded file in milliseconds
+    * record_samples — number of recorded samples
+    * playback_terminator_used — TouchTone digit used to terminate recording
+    *
+    * @param filePath      : String An application will record to a file specified by file path.
+    * @param timeLimitSecs : Duration it is the maximum duration of the recording in seconds
+    * @param silenceThresh : Duration it is an energy level below which is considered silence.
+    * @param silenceHits   : Duration it is how many seconds of audio below silence_thresh will be tolerated before the recording stops.
+    *                      When omitted, the default value is 3 seconds
+    * @param config        :ApplicationCommandConfig
+    */
+  case class Record(filePath: String,
+                    timeLimitSecs: Duration,
+                    silenceThresh: Duration,
+                    silenceHits: Option[Duration],
+                    config: ApplicationCommandConfig) extends FSExecuteApp {
+    override val application: String = "record"
+    override val args: String = s"$filePath ${timeLimitSecs.toSeconds} ${silenceThresh.toSeconds}${silenceHits.fold("")(f => s" ${f.toSeconds.toString}")}"
+  }
+
+  /**
+    * Records an entire phone call or session.
+    * Multiple media bugs can be placed on the same channel.
+    *
+    * @param fileFormat : String file format like gsm,mp3,wav, ogg, etc
+    * @param config     : ApplicationCommandConfig
+    */
+  case class RecordSession(fileFormat: String, config: ApplicationCommandConfig) extends FSExecuteApp {
+    override val application: String = "record_session"
+    override val args: String = s"/tmp/test.$fileFormat"
+  }
+
+  /**
+    * Send DTMF digits from the session using the method(s) configured on the endpoint in use
+    * If no duration is specified the default DTMF length of 2000ms will be used.
+    *
+    * @param dtmfDigits : String DTMF digits
+    * @param toneDuration
+    * @param config
+    */
+  case class SendDtmf(dtmfDigits: String,
+                      toneDuration: Option[Duration],
+                      config: ApplicationCommandConfig) extends FSExecuteApp {
+    override val application: String = "sned_dtmf"
+    override val args: String = s"$dtmfDigits${toneDuration.fold("")(f => s"@${f.toMillis.toString}")}"
+  }
+
+  /**
+    * Stop record session.
+    * Usage: <action application="stop_record_session" data="path"/>
+    *
+    * @param filePath : String file name
+    * @param config   : ApplicationCommandConfig
+    */
+  case class StopRecordSession(filePath: String,
+                               config: ApplicationCommandConfig) extends FSExecuteApp {
+    override val application: String = "stop_record_session"
+    override val args: String = filePath
+  }
+
+  /**
+    * Places a channel "on hold" in the switch, instead of in the phone. Allows for a number of different options, including:
+    * Set caller in a place where the channel won't be hungup on, while waiting for someone to talk to.
+    * Generic "hold" mechanism, where you transfer a caller to it.
+    * Please note that to retrieve a call that has been "parked", you'll have to bridge to them or transfer the call to a valid location.
+    * Also, remember that parking a call does NOT supply music on hold or any other media.
+    * Park is quite literally a way to put a call in limbo until you you bridge/uuid_bridge or transfer/uuid_transfer it.
+    * Note that the park application takes no arguments, so the data attribute can be omitted in the definition.
+    *
+    * @param config: ApplicationCommandConfig
+    */
+  case class Park(config: ApplicationCommandConfig) extends FSExecuteApp {
+    override val application: String = "park"
+  }
+
 }
 
 case class CommandRequest(command: FSCommand, queueOfferResult: Future[QueueOfferResult])
 
 case class DialType(separator: String) extends AnyVal
+
+trait TimeUnit
+
 
 /**
   *
