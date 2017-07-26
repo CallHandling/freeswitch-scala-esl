@@ -35,13 +35,23 @@ import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutExcep
 import scala.util.{Failure, Success}
 
 trait FSConnection extends Logging {
+
+  case class CommandToQueue(command: FSCommand, executeEvent: Promise[EventMessage], executeComplete: Promise[EventMessage])
+
+  case class CommandResponse(command: FSCommand, commandReply: Future[CommandReply], executeEvent: Future[EventMessage], executeComplete: Future[EventMessage])
+
   lazy val parser = DefaultParser
   implicit protected val system: ActorSystem
   implicit protected val materializer: ActorMaterializer
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
   private[this] var unParsedBuffer = ""
   protected val bgapiMap: mutable.Map[String, Promise[CommandReply]] = mutable.Map.empty
+
   val commandQueue: mutable.Queue[Promise[CommandReply]] = mutable.Queue.empty
+
+  val eventMap: mutable.Map[String, CommandToQueue] = mutable.Map.empty
+
+
   lazy val (queue, source) = Source.queue[FSCommand](50, OverflowStrategy.backpressure)
     .toMat(Sink.asPublisher(false))(Keep.both).run()
 
@@ -127,36 +137,67 @@ trait FSConnection extends Logging {
   }
 
   /**
-    * This function will dequeue an element from queue then complete a promise with command reply message
+    * This function will handle FS messages
     *
     * @param fSMessage : FSMessage FS message
     * @return FSMessage
     */
   private def handleFSMessage(fSMessage: FSMessage): FSMessage = fSMessage match {
-    case cmdReply: CommandReply =>
-      if (commandQueue.nonEmpty) {
-        val promise = commandQueue.dequeue()
-        if (cmdReply.success)
-          promise.complete(Success(cmdReply))
-        else promise.complete(Failure(new Exception(s"Failed to get success reply: ${cmdReply.errorMessage}")))
-      }
-      cmdReply
+    case cmdReply: CommandReply => handleCommandReplyMessage(cmdReply)
     case apiResponse: ApiResponse => apiResponse //TODO Will implement logic for handle an api response
-    case eventMessage: EventMessage => eventMessage //TODO Will implement logic for handle an event message
+    case eventMessage: EventMessage => handleFSEventMessage(eventMessage)
     case basicMessage: BasicMessage => basicMessage //TODO Will implement logic for handle the basic message
   }
 
   /**
-    * publish FS command to FS
+    * This function dequeue an element from queue and complete promise with command reply message
+    * @param cmdReply: CommandReply
+    * @return CommandReply
+    */
+  private def handleCommandReplyMessage(cmdReply: CommandReply): CommandReply = {
+    if (commandQueue.nonEmpty) {
+      val promise = commandQueue.dequeue()
+      if (cmdReply.success)
+        promise.complete(Success(cmdReply))
+      else promise.complete(Failure(new Exception(s"Failed to get success reply: ${cmdReply.errorMessage}")))
+    }
+    cmdReply
+  }
+
+  /**
+    * This will get an element from `eventMap` map by event's uuid
+    * Complete promises after receiving `CHANNEL_EXECUTE` and `CHANNEL_EXECUTE_COMPLETE` events
+    * @param eventMessage: EventMessage
+    * @return EventMessage
+    */
+  private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
+    eventMessage.applicationUuid.flatMap(eventMap.lift).foreach {
+      commandToQueue =>
+        if (eventMessage.eventName.contains(EventNames.ChannelExecute))
+          commandToQueue.executeEvent.complete(Success(eventMessage))
+        else if (eventMessage.eventName.contains(EventNames.ChannelExecuteComplete)) {
+          commandToQueue.executeComplete.complete(Success(eventMessage))
+          eventMap.remove(commandToQueue.command.eventUuid)
+        }
+    }
+    eventMessage
+  }
+
+  /**
+    * publish FS command to FS, An enqueue command into `commandQueue` and add command with events promises into `eventMap`
     *
     * @param command : FSCommand FS command
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def publishCommand(command: FSCommand): Future[CommandReply] = {
-    queue.offer(command).flatMap { _ =>
-      val promise = Promise[CommandReply]()
-      commandQueue.enqueue(promise)
-      promise.future
+  private def publishCommand(command: FSCommand): Future[CommandResponse] = {
+    queue.offer(command).map { _ =>
+      val commandReply = Promise[CommandReply]()
+      val execEvent = Promise[EventMessage]()
+      val completeEvent = Promise[EventMessage]()
+      val commandToQueue = CommandToQueue(command, execEvent, completeEvent)
+      commandQueue.enqueue(commandReply)
+      eventMap += command.eventUuid -> commandToQueue
+      CommandResponse(command, commandReply.future, execEvent.future, completeEvent.future)
     }
   }
 
@@ -165,9 +206,9 @@ trait FSConnection extends Logging {
     *
     * @param fileName : String name of the play file
     * @param config   : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def play(fileName: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+  def play(fileName: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(PlayFile(fileName, config))
 
   /**
@@ -176,9 +217,9 @@ trait FSConnection extends Logging {
     *
     * @param extension : String extension name
     * @param config    : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def transfer(extension: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+  def transfer(extension: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(TransferTo(extension, config))
 
   /**
@@ -187,9 +228,9 @@ trait FSConnection extends Logging {
     *
     * @param cause  : HangupCause
     * @param config :ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def hangup(cause: HangupCause, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+  def hangup(cause: Option[HangupCause] = Option.empty, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Hangup(cause, config))
 
   /**
@@ -197,9 +238,9 @@ trait FSConnection extends Logging {
     * Optionally clears all unprocessed events (queued applications) on the channel.
     *
     * @param config : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def break(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+  def break(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Break(config))
 
   /**
@@ -209,26 +250,27 @@ trait FSConnection extends Logging {
     * the ringback tones sent to the caller will be defined by transfer_ringback.
     *
     * @param config : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def answer(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+  def answer(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Answer(config))
 
   /**
     * This will publish the FS command(play,transfer,break etc) to FS
     *
     * @param command : FSCommand
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def sendCommand(command: FSCommand): Future[CommandReply] = publishCommand(command)
+  def sendCommand(command: FSCommand): Future[CommandResponse] = publishCommand(command)
 
   /**
     * This will publish the string version of FS command to FS
     *
-    * @param command :String
-    * @return Future[CommandReply]
+    * @param command   :String
+    * @param eventUuid String
+    * @return Future[CommandResponse]
     */
-  def sendCommand(command: String): Future[CommandReply] = publishCommand(CommandAsString(command))
+  def sendCommand(command: String, eventUuid: String): Future[CommandResponse] = publishCommand(CommandAsString(command, eventUuid))
 
   /**
     * filter
@@ -239,10 +281,10 @@ trait FSConnection extends Logging {
     *
     * @param events : Map[EventName, String] mapping of events and their value
     * @param config : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
   def filter(events: Map[EventName, String],
-             config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+             config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Filter(events, config))
 
   /**
@@ -254,10 +296,10 @@ trait FSConnection extends Logging {
     *
     * @param events :Map[EventName, String] mapping of events and their value
     * @param config :ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
   def deleteFilter(events: Map[EventName, String],
-                   config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+                   config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(DeleteFilter(events, config))
 
   /**
@@ -269,13 +311,13 @@ trait FSConnection extends Logging {
     * @param hangupKey     : Char "attxfer_hangup_key" - can be used to hangup the call after user wants to end his or her call (deafault '*')
     * @param cancelKey     : Char "attxfer_cancel_key" - can be used to cancel a tranfer just like origination_cancel_key, but straight from the att_xfer code (deafault '#')
     * @param config        : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
   def attXfer(destination: String,
               conferenceKey: Char = '0',
               hangupKey: Char = '*',
               cancelKey: Char = '#',
-              config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+              config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(AttXfer(destination, conferenceKey, hangupKey, cancelKey, config))
 
   /**
@@ -288,11 +330,11 @@ trait FSConnection extends Logging {
     * @param dialType : DialType To dial multiple contacts all at once then separate targets by comma(,) or To dial multiple contacts one at a time
     *                 then separate targets by pipe(|)
     * @param config   :ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
   def bridge(targets: List[String],
              dialType: DialType,
-             config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+             config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Bridge(targets, dialType, config))
 
   /**
@@ -301,9 +343,9 @@ trait FSConnection extends Logging {
     *
     * @param uuid   : String
     * @param config :ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def intercept(uuid: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+  def intercept(uuid: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Intercept(uuid, config))
 
   /**
@@ -318,13 +360,13 @@ trait FSConnection extends Logging {
     * @param timeout      Number of milliseconds to wait on each digit
     * @param terminators  Digits used to end input if less than <min> digits have been pressed. (Typically '#')
     * @param config       ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
   def read(min: Int, max: Int)(soundFile: String,
                                variableName: String,
                                timeout: Duration,
                                terminators: List[Char] = List('#'),
-                               config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+                               config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Read(ReadParameters(min, max, soundFile, variableName, timeout, terminators), config))
 
   /**
@@ -337,7 +379,7 @@ trait FSConnection extends Logging {
     * @param uuid : String
     * @return Future[CommandReply
     */
-  def subscribeMyEvents(uuid: String = ""): Future[CommandReply] = publishCommand(SubscribeMyEvents(uuid))
+  def subscribeMyEvents(uuid: String = ""): Future[CommandResponse] = publishCommand(SubscribeMyEvents(uuid))
 
   /**
     * Enable or disable events by class or all (plain or xml or json output format). Currently we are supporting plain events
@@ -345,16 +387,16 @@ trait FSConnection extends Logging {
     * @param events : EventName* specify any number of events
     * @return Future[CommandReply
     */
-  def subscribeEvents(events: EventName*): Future[CommandReply] = publishCommand(SubscribeEvents(events.toList))
+  def subscribeEvents(events: EventName*): Future[CommandResponse] = publishCommand(SubscribeEvents(events.toList))
 
   /**
     * Speak a phrase of text using a predefined phrase macro
     *
     * @param variableName : String variable name
     * @param config       : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def phrase(variableName: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+  def phrase(variableName: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Phrase(variableName, config))
 
   /**
@@ -366,9 +408,9 @@ trait FSConnection extends Logging {
     *
     * @param numberOfMillis : Duration duration must be in milliseconds
     * @param config         : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def sleep(numberOfMillis: Duration, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+  def sleep(numberOfMillis: Duration, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Sleep(numberOfMillis, config))
 
   /**
@@ -378,18 +420,18 @@ trait FSConnection extends Logging {
     * @param varName  : String variable name
     * @param varValue : String variable value
     * @param config   : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def setVar(varName: String, varValue: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+  def setVar(varName: String, varValue: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(SetVar(varName, varValue, config))
 
   /**
     * pre_answer establishes media (early media) but does not answer.
     *
     * @param config : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def preAnswer(config: ApplicationCommandConfig): Future[CommandReply] =
+  def preAnswer(config: ApplicationCommandConfig): Future[CommandResponse] =
     publishCommand(PreAnswer(config))
 
   /**
@@ -407,13 +449,13 @@ trait FSConnection extends Logging {
     * @param silenceHits   : Duration it is how many seconds of audio below silence_thresh will be tolerated before the recording stops.
     *                      When omitted, the default value is 3 seconds
     * @param config        :ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
   def record(filePath: String,
              timeLimitSecs: Duration,
              silenceThresh: Duration,
              silenceHits: Option[Duration] = Option.empty,
-             config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+             config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Record(filePath, timeLimitSecs, silenceThresh, silenceHits, config))
 
   /**
@@ -422,9 +464,9 @@ trait FSConnection extends Logging {
     *
     * @param fileFormat : String file format like gsm,mp3,wav, ogg, etc
     * @param config     : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def recordSession(fileFormat: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+  def recordSession(fileFormat: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(RecordSession(fileFormat, config))
 
   /**
@@ -434,11 +476,11 @@ trait FSConnection extends Logging {
     * @param dtmfDigits   : String DTMF digits
     * @param toneDuration : Option[Duration] default is empty
     * @param config       : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
   def sendDtmf(dtmfDigits: String,
                toneDuration: Option[Duration] = Option.empty,
-               config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+               config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(SendDtmf(dtmfDigits, toneDuration, config))
 
   /**
@@ -447,10 +489,10 @@ trait FSConnection extends Logging {
     *
     * @param filePath : String file name
     * @param config   : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
   def stopRecordSession(filePath: String,
-                        config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+                        config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(StopRecordSession(filePath, config))
 
   /**
@@ -463,8 +505,8 @@ trait FSConnection extends Logging {
     * Note that the park application takes no arguments, so the data attribute can be omitted in the definition.
     *
     * @param config : ApplicationCommandConfig
-    * @return Future[CommandReply]
+    * @return Future[CommandResponse]
     */
-  def park(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandReply] =
+  def park(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Park(config))
 }

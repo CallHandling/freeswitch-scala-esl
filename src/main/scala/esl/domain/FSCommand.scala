@@ -35,7 +35,7 @@ sealed trait FSExecuteApp extends FSCommand {
 
   override def toString: String = {
     val b = StringBuilder.newBuilder
-    b.append(s"sendmsg ${config.uuid}${LINE_TERMINATOR}Event-UUID: $eventUuid$LINE_TERMINATOR")
+    b.append(s"sendmsg ${config.channelUuid}${LINE_TERMINATOR}Event-UUID: $eventUuid$LINE_TERMINATOR")
     b.append(s"call-command: execute${LINE_TERMINATOR}execute-app-name: $application$LINE_TERMINATOR")
     if (config.eventLock) b.append(s"event-lock: true$LINE_TERMINATOR")
     if (config.loops > 1) b.append(s"loops: ${config.loops}$LINE_TERMINATOR")
@@ -45,7 +45,14 @@ sealed trait FSExecuteApp extends FSCommand {
   }
 }
 
-case class ApplicationCommandConfig(uuid: String = "", eventLock: Boolean = false,
+/**
+  *
+  * @param channelUuid The uuid of the channel to execute the application command on, not required in outbound mode if you want to effect the outbound channel
+  * @param eventLock Force application to complete before next command is parsed
+  * @param loops Number of times to invoke the command, default 1
+  * @param async Set the execution mode to async, has no effect in Outbound async mode
+  */
+case class ApplicationCommandConfig(channelUuid: String = "", eventLock: Boolean = false,
                                     loops: Int = 1, async: Boolean = false)
 
 object CallCommands {
@@ -64,9 +71,9 @@ object CallCommands {
     * @param cause  : HangupCause
     * @param config : ApplicationCommandConfig
     */
-  case class Hangup(cause: HangupCause, config: ApplicationCommandConfig) extends FSExecuteApp {
+  case class Hangup(cause: Option[HangupCause], config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "hangup"
-    override val args: String = cause.name
+    override val args: String = cause.fold("")(_.name)
   }
 
   case class Break(config: ApplicationCommandConfig) extends FSExecuteApp {
@@ -170,7 +177,7 @@ object CallCommands {
     *
     * @param command : String
     */
-  case class CommandAsString(command: String) extends FSCommand {
+  case class CommandAsString(command: String, override val eventUuid: String) extends FSCommand {
     override def toString: String = command
   }
 
@@ -344,7 +351,7 @@ object CallCommands {
   case class SendDtmf(dtmfDigits: String,
                       toneDuration: Option[Duration],
                       config: ApplicationCommandConfig) extends FSExecuteApp {
-    override val application: String = "sned_dtmf"
+    override val application: String = "send_dtmf"
     override val args: String = s"$dtmfDigits${toneDuration.fold("")(f => s"@${f.toMillis.toString}")}"
   }
 
