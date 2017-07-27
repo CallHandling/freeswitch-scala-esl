@@ -37,7 +37,7 @@ sealed trait FSExecuteApp extends FSCommand {
     val b = StringBuilder.newBuilder
     b.append(s"sendmsg ${config.channelUuid}${LINE_TERMINATOR}Event-UUID: $eventUuid$LINE_TERMINATOR")
     b.append(s"call-command: execute${LINE_TERMINATOR}execute-app-name: $application$LINE_TERMINATOR")
-    if (config.eventLock) b.append(s"event-lock: true$LINE_TERMINATOR")
+    if (config.eventLock) b.append(s"event-lock: ${config.eventLock}$LINE_TERMINATOR")
     if (config.loops > 1) b.append(s"loops: ${config.loops}$LINE_TERMINATOR")
     if (config.async) b.append(s"async: ${config.async}$LINE_TERMINATOR")
     if (args.length > 0) b.append(s"content-type: text/plain${LINE_TERMINATOR}content-length: ${args.length}$MESSAGE_TERMINATOR$args$LINE_TERMINATOR")
@@ -48,12 +48,12 @@ sealed trait FSExecuteApp extends FSCommand {
 /**
   *
   * @param channelUuid The uuid of the channel to execute the application command on, not required in outbound mode if you want to effect the outbound channel
-  * @param eventLock Force application to complete before next command is parsed
-  * @param loops Number of times to invoke the command, default 1
-  * @param async Set the execution mode to async, has no effect in Outbound async mode
+  * @param eventLock   Force application to complete before next command is parsed
+  * @param loops       Number of times to invoke the command, default 1
+  * @param async       Set the execution mode to async, has no effect in Outbound async mode
   */
 final case class ApplicationCommandConfig(channelUuid: String = "", eventLock: Boolean = false,
-                                    loops: Int = 1, async: Boolean = false)
+                                          loops: Int = 1, async: Boolean = false)
 
 object CallCommands {
 
@@ -144,10 +144,10 @@ object CallCommands {
     * @param config        : ApplicationCommandConfig
     */
   final case class AttXfer(destination: String,
-                     conferenceKey: Char,
-                     hangupKey: Char,
-                     cancelKey: Char,
-                     config: ApplicationCommandConfig) extends FSExecuteApp {
+                           conferenceKey: Char,
+                           hangupKey: Char,
+                           cancelKey: Char,
+                           config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "att_xfer"
     override val args: String = s"{attxfer_conf_key=$conferenceKey,attxfer_hangup_key=$hangupKey,attxfer_cancel_key=$cancelKey}$destination"
   }
@@ -320,10 +320,10 @@ object CallCommands {
     * @param config        :ApplicationCommandConfig
     */
   final case class Record(filePath: String,
-                    timeLimitSecs: Duration,
-                    silenceThresh: Duration,
-                    silenceHits: Option[Duration],
-                    config: ApplicationCommandConfig) extends FSExecuteApp {
+                          timeLimitSecs: Duration,
+                          silenceThresh: Duration,
+                          silenceHits: Option[Duration],
+                          config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "record"
     override val args: String = s"$filePath ${timeLimitSecs.toSeconds} ${silenceThresh.toSeconds}${silenceHits.fold("")(f => s" ${f.toSeconds.toString}")}"
   }
@@ -332,12 +332,12 @@ object CallCommands {
     * Records an entire phone call or session.
     * Multiple media bugs can be placed on the same channel.
     *
-    * @param fileFormat : String file format like gsm,mp3,wav, ogg, etc
-    * @param config     : ApplicationCommandConfig
+    * @param filePathWithFormat : String file format like gsm,mp3,wav, ogg, etc
+    * @param config             : ApplicationCommandConfig
     */
-  final case class RecordSession(fileFormat: String, config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class RecordSession(filePathWithFormat: String, config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "record_session"
-    override val args: String = s"/tmp/test.$fileFormat"
+    override val args: String = filePathWithFormat
   }
 
   /**
@@ -349,8 +349,8 @@ object CallCommands {
     * @param config       : ApplicationCommandConfig
     */
   final case class SendDtmf(dtmfDigits: String,
-                      toneDuration: Option[Duration],
-                      config: ApplicationCommandConfig) extends FSExecuteApp {
+                            toneDuration: Option[Duration],
+                            config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "send_dtmf"
     override val args: String = s"$dtmfDigits${toneDuration.fold("")(f => s"@${f.toMillis.toString}")}"
   }
@@ -363,7 +363,7 @@ object CallCommands {
     * @param config   : ApplicationCommandConfig
     */
   final case class StopRecordSession(filePath: String,
-                               config: ApplicationCommandConfig) extends FSExecuteApp {
+                                     config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "stop_record_session"
     override val args: String = filePath
   }
@@ -381,6 +381,25 @@ object CallCommands {
     */
   final case class Park(config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "park"
+  }
+
+  /**
+    * Close the socket connection.
+    *
+    * @param config : ApplicationCommandConfig
+    */
+  final case class Exit(config: ApplicationCommandConfig) extends FSCommand {
+    override def toString: String = s"exit$MESSAGE_TERMINATOR"
+  }
+
+  /**
+    * Enable log output. Levels same as the console.conf values
+    *
+    * @param logLevel : String
+    * @param config   : ApplicationCommandConfig
+    */
+  final case class Log(logLevel: String, config: ApplicationCommandConfig) extends FSCommand {
+    override def toString: String = s"log $logLevel$MESSAGE_TERMINATOR"
   }
 
 }
@@ -416,8 +435,8 @@ case object OneAtATime extends DialType {
   * @param terminators  Digits used to end input if less than <min> digits have been pressed. (Typically '#')
   */
 final case class ReadParameters(min: Int,
-                          max: Int,
-                          soundFile: String,
-                          variableName: String,
-                          timeout: Duration,
-                          terminators: List[Char])
+                                max: Int,
+                                soundFile: String,
+                                variableName: String,
+                                timeout: Duration,
+                                terminators: List[Char])

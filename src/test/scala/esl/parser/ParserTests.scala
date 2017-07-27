@@ -54,4 +54,9 @@ class ParserTests extends FlatSpec with Matchers {
       bm.map(_.headers.size) should contain allElementsOf List(16, 52, 4)
     }
   }
+
+  it must "parse a set command response data" in {
+    val (messages, _) = DefaultParser.parse(TestMessages.setVarPrivateCommand)
+    messages should not be empty
+  }
 }

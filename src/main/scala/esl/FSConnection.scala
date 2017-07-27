@@ -62,6 +62,8 @@ trait FSConnection extends Logging {
   private[this] val incoming = Flow[ByteString].map { data =>
     logger.debug(s"Received data from FS:\n ${data.utf8String}")
     val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
+    println("::::::::::::::::data:::"+unParsedBuffer + data.utf8String)
+    println("::::::::::::::::Messages:::"+messages)
     unParsedBuffer = buffer
     messages
   }
@@ -121,7 +123,7 @@ trait FSConnection extends Logging {
     val connectToFS = (messages: List[FSMessage]) => {
       messages.collectFirst {
         case command: CommandReply =>
-          if (command.success || true) {
+          if (command.success) {
             fsConnectionPromise.complete(Success(fsConnection))
             hasConnected = true
           } else {
@@ -151,7 +153,8 @@ trait FSConnection extends Logging {
 
   /**
     * This function dequeue an element from queue and complete promise with command reply message
-    * @param cmdReply: CommandReply
+    *
+    * @param cmdReply : CommandReply
     * @return CommandReply
     */
   private def handleCommandReplyMessage(cmdReply: CommandReply): CommandReply = {
@@ -167,7 +170,8 @@ trait FSConnection extends Logging {
   /**
     * This will get an element from `eventMap` map by event's uuid
     * Complete promises after receiving `CHANNEL_EXECUTE` and `CHANNEL_EXECUTE_COMPLETE` events
-    * @param eventMessage: EventMessage
+    *
+    * @param eventMessage : EventMessage
     * @return EventMessage
     */
   private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
@@ -462,12 +466,12 @@ trait FSConnection extends Logging {
     * Records an entire phone call or session.
     * Multiple media bugs can be placed on the same channel.
     *
-    * @param fileFormat : String file format like gsm,mp3,wav, ogg, etc
-    * @param config     : ApplicationCommandConfig
+    * @param filePathWithFormat : String file path with format like test.gsm,test.mp3,test.wav,test.ogg etc
+    * @param config             : ApplicationCommandConfig
     * @return Future[CommandResponse]
     */
-  def recordSession(fileFormat: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
-    publishCommand(RecordSession(fileFormat, config))
+  def recordSession(filePathWithFormat: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
+    publishCommand(RecordSession(filePathWithFormat, config))
 
   /**
     * Send DTMF digits from the session using the method(s) configured on the endpoint in use
@@ -509,4 +513,21 @@ trait FSConnection extends Logging {
     */
   def park(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Park(config))
+
+  /**
+    * Enable log output. Levels same as the console.conf values
+    *
+    * @param logLevel : String
+    * @param config   : ApplicationCommandConfig
+    */
+  def log(logLevel: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
+    publishCommand(Log(logLevel, config))
+
+  /**
+    * Close the socket connection.
+    *
+    * @param config : ApplicationCommandConfig
+    */
+  def exit(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
+    publishCommand(Exit(config))
 }

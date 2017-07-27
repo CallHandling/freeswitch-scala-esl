@@ -16,7 +16,10 @@
 
 package esl.domain
 
+import java.net.URLDecoder
+
 import esl.util._
+
 import scala.language.postfixOps
 
 trait FSMessage extends FSBridgeCommand {
@@ -40,9 +43,10 @@ case class CommandReply(basicMessage: BasicMessage) extends FSMessage {
   override val body: Option[String] = basicMessage.body
   override val contentLength: Int = basicMessage.contentLength
   override val contentType: String = basicMessage.contentType
+
   val replyText = headers.lift(HeaderNames.replyText)
 
-  val success: Boolean = replyText.exists(_.charAt(0) == '+')
+  val success: Boolean = replyText.exists(URLDecoder.decode(_, "UTF-8").charAt(0) == '+')
 
   val errorMessage: String = replyText.collect {
     case text if text.startsWith("-ERR") => text.substring(5, text.length - 5)

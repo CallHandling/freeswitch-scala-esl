@@ -453,4 +453,78 @@ object TestMessages {
                            |Application-UUID: fd3ababd-ad60-4582-8c6c-609064d55fe7
                            |
                            |""".stripMargin.replace("\r","")
+
+  val setVarPrivateCommand = """Content-Length: 2414
+                |Content-Type: text/event-plain
+                |
+                |Command: sendmsg%20%0AEvent-UUID%3A%20049a9bb9-2bc5-41dd-9a56-878a8d189224%0Acall-command%3A%20execute%0Aexecute-app-name%3A%20set%0Acontent-type%3A%20text/plain%0Acontent-length%3A%2022%0A%0A
+                |Event-UUID: 049a9bb9-2bc5-41dd-9a56-878a8d189224
+                |call-command: execute
+                |execute-app-name: set
+                |content-type: text/plain
+                |content-length: 22
+                |Event-Name: PRIVATE_COMMAND
+                |Core-UUID: d01fd5af-47d1-4cc0-9135-72be72656b21
+                |FreeSWITCH-Hostname: abdhesh-System-Product-Name
+                |FreeSWITCH-Switchname: abdhesh-System-Product-Name
+                |FreeSWITCH-IPv4: 10.0.0.29
+                |FreeSWITCH-IPv6: %3A%3A1
+                |Event-Date-Local: 2017-07-27%2015%3A16%3A43
+                |Event-Date-GMT: Thu,%2027%20Jul%202017%2014%3A16%3A43%20GMT
+                |Event-Date-Timestamp: 1501165003827984
+                |Event-Calling-File: switch_ivr.c
+                |Event-Calling-Function: switch_ivr_parse_next_event
+                |Event-Calling-Line-Number: 792
+                |Event-Sequence: 75095
+                |Channel-State: CS_EXECUTE
+                |Channel-Call-State: EARLY
+                |Channel-State-Number: 4
+                |Channel-Name: sofia/internal/1000%4010.0.0.29
+                |Unique-ID: dad826a9-ceb2-4aa6-99b7-75a844a1672c
+                |Call-Direction: inbound
+                |Presence-Call-Direction: inbound
+                |Channel-HIT-Dialplan: true
+                |Channel-Presence-ID: 1000%4010.0.0.29
+                |Channel-Call-UUID: dad826a9-ceb2-4aa6-99b7-75a844a1672c
+                |Answer-State: early
+                |Channel-Read-Codec-Name: PCMA
+                |Channel-Read-Codec-Rate: 8000
+                |Channel-Read-Codec-Bit-Rate: 64000
+                |Channel-Write-Codec-Name: PCMA
+                |Channel-Write-Codec-Rate: 8000
+                |Channel-Write-Codec-Bit-Rate: 64000
+                |Caller-Direction: inbound
+                |Caller-Logical-Direction: inbound
+                |Caller-Username: 1000
+                |Caller-Dialplan: XML
+                |Caller-Caller-ID-Name: 1000
+                |Caller-Caller-ID-Number: 1000
+                |Caller-Orig-Caller-ID-Name: 1000
+                |Caller-Orig-Caller-ID-Number: 1000
+                |Caller-Network-Addr: 10.0.0.29
+                |Caller-ANI: 1000
+                |Caller-Destination-Number: 9999
+                |Caller-Unique-ID: dad826a9-ceb2-4aa6-99b7-75a844a1672c
+                |Caller-Source: mod_sofia
+                |Caller-Context: default
+                |Caller-Channel-Name: sofia/internal/1000%4010.0.0.29
+                |Caller-Profile-Index: 1
+                |Caller-Profile-Created-Time: 1501165001847941
+                |Caller-Channel-Created-Time: 1501165001847941
+                |Caller-Channel-Answered-Time: 0
+                |Caller-Channel-Progress-Time: 0
+                |Caller-Channel-Progress-Media-Time: 1501165002047916
+                |Caller-Channel-Hangup-Time: 0
+                |Caller-Channel-Transfer-Time: 0
+                |Caller-Channel-Resurrect-Time: 0
+                |Caller-Channel-Bridged-Time: 0
+                |Caller-Channel-Last-Hold: 0
+                |Caller-Channel-Hold-Accum: 0
+                |Caller-Screen-Bit: true
+                |Caller-Privacy-Hide-Name: false
+                |Caller-Privacy-Hide-Number: false
+                |Content-Length: 22
+                |
+                |playback_terminators=#""".stripMargin.replace("\r","")
+
 }

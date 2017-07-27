@@ -55,7 +55,6 @@ object DefaultParser extends Parser {
       */
     def parseBasicMessage(textRemaining: String): (String, Option[BasicMessage], Boolean) = {
       val listOfThings = splitIncomingString(textRemaining, "\n\n", Nil, 3).reverse
-
       listOfThings match {
         case Nil => (textRemaining, None, true)
         case header :: Nil => (header._1, None, true)
@@ -66,7 +65,7 @@ object DefaultParser extends Parser {
           if (contentLength != -1) {
             val foldedResult = rest.foldLeft(("", "", 0)) { (accum, elem) => {
               if (accum._3 == -1) (accum._1, accum._2 + elem._1, accum._3)
-              else if (elem._2 + accum._3 == contentLength) (accum._1 + elem._1, accum._2, -1)
+              else if (elem._2 + accum._3 >= contentLength) (accum._1 + elem._1, accum._2, -1)
               else (accum._1 + elem._1, accum._2, accum._3 + elem._2)
             }
             }
@@ -92,15 +91,17 @@ object DefaultParser extends Parser {
     @tailrec
     def doParse(doTxt: String, msgs: List[FSMessage]): (List[FSMessage], String) = {
       import scala.language.postfixOps
-      val k = parseBasicMessage(doTxt)
-      k match {
+      val (textRemaining,basicMessage,isRemaining) = parseBasicMessage(doTxt)
+      (textRemaining,basicMessage,isRemaining) match {
         case (t, None, f) if f =>
           if (msgs isEmpty) (Nil, t) else (msgs, t)
         case (t, None, f) if !f => doParse(t, msgs)
         case (t, Some(x), f) if !f && x.contentType == ContentTypes.eventPlain =>
           doParse(t, EventMessage(x) :: msgs)
+        case (t, Some(x), f) if f && x.contentType == ContentTypes.eventPlain =>
+          (EventMessage(x) :: msgs, t)
         case (t, Some(x), f) if !f && x.contentType == ContentTypes.commandReply &&
-          x.headers.get(HeaderNames.eventName).exists(_ == EventNames.ChannelData.name) =>
+          x.headers.get(HeaderNames.eventName).contains(EventNames.ChannelData.name) =>
           doParse(t, CommandReply(x) :: msgs)
         case (t, Some(x), f) if !f && x.contentType == ContentTypes.commandReply &&
           !x.headers.contains(HeaderNames.eventName) =>
