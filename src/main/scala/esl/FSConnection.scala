@@ -62,8 +62,6 @@ trait FSConnection extends Logging {
   private[this] val incoming = Flow[ByteString].map { data =>
     logger.debug(s"Received data from FS:\n ${data.utf8String}")
     val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
-    println("::::::::::::::::data:::"+unParsedBuffer + data.utf8String)
-    println("::::::::::::::::Messages:::"+messages)
     unParsedBuffer = buffer
     messages
   }
