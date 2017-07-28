@@ -22,6 +22,7 @@ import akka.pattern.after
 import akka.stream._
 import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
 import akka.util.ByteString
+import esl.FSConnection._
 import esl.domain.CallCommands._
 import esl.domain.EventNames.EventName
 import esl.domain.HangupCauses.HangupCause
@@ -36,20 +37,20 @@ import scala.util.{Failure, Success}
 
 trait FSConnection extends Logging {
 
-  case class CommandToQueue(command: FSCommand, executeEvent: Promise[EventMessage], executeComplete: Promise[EventMessage])
 
-  case class CommandResponse(command: FSCommand, commandReply: Future[CommandReply], executeEvent: Future[EventMessage], executeComplete: Future[EventMessage])
-
-  lazy val parser = DefaultParser
+  lazy private[this] val parser = DefaultParser
   implicit protected val system: ActorSystem
   implicit protected val materializer: ActorMaterializer
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
   private[this] var unParsedBuffer = ""
-  protected val bgapiMap: mutable.Map[String, Promise[CommandReply]] = mutable.Map.empty
+  private[this] val bgapiMap: mutable.Map[String, Promise[CommandReply]] = mutable.Map.empty
 
-  val commandQueue: mutable.Queue[Promise[CommandReply]] = mutable.Queue.empty
+  /**
+    * This queue maintain the promise of CommandReply for each respective FSCommand
+    */
+  private[this] val commandQueue: mutable.Queue[Promise[CommandReply]] = mutable.Queue.empty
 
-  val eventMap: mutable.Map[String, CommandToQueue] = mutable.Map.empty
+  private[this] val eventMap: mutable.Map[String, CommandToQueue] = mutable.Map.empty
 
 
   lazy val (queue, source) = Source.queue[FSCommand](50, OverflowStrategy.backpressure)
@@ -84,7 +85,8 @@ trait FSConnection extends Logging {
     * @return (Source[FreeSwitchCommand, NotUsed], BidiFlow[ByteString, T, FreeSwitchCommand, ByteString, NotUsed])
     *         return tuple of source and flow
     */
-  def handler[T](flow: Flow[ByteString, List[FSMessage], _] => Flow[ByteString, T, _]): (Source[FSCommand, NotUsed], BidiFlow[ByteString, T, FSCommand, ByteString, NotUsed]) = {
+  def handler[T](flow: Flow[ByteString,
+    List[FSMessage], _] => Flow[ByteString, T, _]): (Source[FSCommand, NotUsed], BidiFlow[ByteString, T, FSCommand, ByteString, NotUsed]) = {
     (Source.fromPublisher(source), BidiFlow.fromFlows(flow(incoming), outgoing))
   }
 
@@ -137,7 +139,7 @@ trait FSConnection extends Logging {
   }
 
   /**
-    * This function will handle FS messages
+    * This function will handle each FS message type
     *
     * @param fSMessage : FSMessage FS message
     * @return FSMessage
@@ -193,13 +195,10 @@ trait FSConnection extends Logging {
     */
   private def publishCommand(command: FSCommand): Future[CommandResponse] = {
     queue.offer(command).map { _ =>
-      val commandReply = Promise[CommandReply]()
-      val execEvent = Promise[EventMessage]()
-      val completeEvent = Promise[EventMessage]()
-      val commandToQueue = CommandToQueue(command, execEvent, completeEvent)
+      val (commandReply, commandToQueue, cmdResponse) = buildCommandAndResponse(command)
       commandQueue.enqueue(commandReply)
       eventMap += command.eventUuid -> commandToQueue
-      CommandResponse(command, commandReply.future, execEvent.future, completeEvent.future)
+      cmdResponse
     }
   }
 
@@ -528,4 +527,50 @@ trait FSConnection extends Logging {
     */
   def exit(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(Exit(config))
+}
+
+object FSConnection {
+
+  private type CommandBuilder = (Promise[CommandReply], CommandToQueue, CommandResponse)
+
+  /**
+    * This is FS command and its events promises
+    *
+    * @param command         : FSCommand it is FS command
+    * @param executeEvent    : Promise[EventMessage] this has to be complete when socket receive ChannelExecute event
+    * @param executeComplete : Promise[EventMessage] this has to be complete when socket receive ChannelExecuteComplete event
+    */
+  case class CommandToQueue(command: FSCommand,
+                            executeEvent: Promise[EventMessage],
+                            executeComplete: Promise[EventMessage])
+
+  /**
+    * It is the response of FS command that has command and events Futures
+    *
+    * @param command         : FSCommand
+    * @param commandReply    : Future[CommandReply] this is the reply of FS command
+    * @param executeEvent    : Future[EventMessage] this is the ChannelExecute event response of FS command
+    * @param executeComplete : Future[EventMessage] this is the ChannelExecuteComplete event response of FS command
+    */
+  case class CommandResponse(command: FSCommand,
+                             commandReply: Future[CommandReply],
+                             executeEvent: Future[EventMessage],
+                             executeComplete: Future[EventMessage])
+
+  /**
+    *
+    * @param command : FSCommand FS command
+    * @return CommandBuilder it is the tuple of three elements. First element of tuple is Promise[CommandReply],
+    *         Second element of tuple is CommandToQueue and third element of tuple is CommandResponse
+    *
+    */
+  private def buildCommandAndResponse(command: FSCommand): CommandBuilder = {
+    val commandReply = Promise[CommandReply]()
+    val execEvent = Promise[EventMessage]()
+    val completeEvent = Promise[EventMessage]()
+    (commandReply,
+      CommandToQueue(command, execEvent, completeEvent),
+      CommandResponse(command, commandReply.future, execEvent.future, completeEvent.future))
+  }
+
 }

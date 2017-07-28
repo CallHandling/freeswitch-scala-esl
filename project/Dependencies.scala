@@ -39,8 +39,8 @@ object Dependencies {
     )
 
   val scalaTest = Seq(
-    "org.scalatest" %% "scalatest" % scalaTestV % "test",
-    "org.mockito" % "mockito-all" % mockitoV % "test",
-    "org.scalacheck" %% "scalacheck" % "1.13.4" % "test"
+    "org.scalatest" %% "scalatest" % scalaTestV % Test,
+    "org.mockito" % "mockito-all" % mockitoV % Test,
+    "org.scalacheck" %% "scalacheck" % scalaCheckV % Test
   )
 }
