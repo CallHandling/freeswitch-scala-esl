@@ -53,14 +53,14 @@ trait FSConnection extends Logging {
   private[this] val eventMap: mutable.Map[String, CommandToQueue] = mutable.Map.empty
 
 
-  lazy val (queue, source) = Source.queue[FSCommand](50, OverflowStrategy.backpressure)
+  protected[this] lazy val (queue, source) = Source.queue[FSCommand](50, OverflowStrategy.backpressure)
     .toMat(Sink.asPublisher(false))(Keep.both).run()
 
   /**
     * It will parsed incoming packet into free switch messages. If there is an unparsed packet from last received packets,
     * will append to the next received packets. So we will get the complete parsed packet.
     */
-  private[this] val incoming = Flow[ByteString].map { data =>
+  private[this] val upstreamFlow: Flow[ByteString, List[FSMessage], _] = Flow[ByteString].map { data =>
     logger.debug(s"Received data from FS:\n ${data.utf8String}")
     val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
     unParsedBuffer = buffer
@@ -70,7 +70,7 @@ trait FSConnection extends Logging {
   /**
     * It will convert the FS command into ByteString
     */
-  private[this] val outgoing: Flow[FSCommand, ByteString, _] = Flow.fromFunction {
+  private[this] val downstreamFlow: Flow[FSCommand, ByteString, _] = Flow.fromFunction {
     fsCommand =>
       logger.info(s"Sending command to FS: ${fsCommand.toString}")
       ByteString(fsCommand.toString)
@@ -79,25 +79,25 @@ trait FSConnection extends Logging {
   /**
     * The function handler will create complete pipeline for incoming and outgoing data
     *
-    * @param flow Flow[ByteString, List[FreeSwitchMessage], _] => Flow[ByteString, T, _]
-    *             It will transform parsed FreeSwitchMessage into type `T` data
-    * @tparam T type `T` is transformed from FreeSwitchMessage
-    * @return (Source[FreeSwitchCommand, NotUsed], BidiFlow[ByteString, T, FreeSwitchCommand, ByteString, NotUsed])
+    * @param flow Flow[ByteString, List[FSMessage], _] => Flow[ByteString, T, _]
+    *             It will transform parsed FSMessage into type `T` data
+    * @tparam T type `T` is transformed from FSMessage
+    * @return (Source[FSCommand, NotUsed], BidiFlow[ByteString, T, FSCommand, ByteString, NotUsed])
     *         return tuple of source and flow
     */
   def handler[T](flow: Flow[ByteString,
     List[FSMessage], _] => Flow[ByteString, T, _]): (Source[FSCommand, NotUsed], BidiFlow[ByteString, T, FSCommand, ByteString, NotUsed]) = {
-    (Source.fromPublisher(source), BidiFlow.fromFlows(flow(incoming), outgoing))
+    (Source.fromPublisher(source), BidiFlow.fromFlows(flow(upstreamFlow), downstreamFlow))
   }
 
   /**
     * handler() function will create pipeline for source and flow
     *
-    * @return Source[FreeSwitchCommand, NotUsed], BidiFlow[ByteString, List[FreeSwitchMessage], FreeSwitchCommand, ByteString, NotUsed]
+    * @return Source[FSCommand, NotUsed], BidiFlow[ByteString, List[FSMessage], FSCommand, ByteString, NotUsed]
     *         tuple of source and flow
     */
   def handler(): (Source[FSCommand, NotUsed], BidiFlow[ByteString, List[FSMessage], FSCommand, ByteString, NotUsed]) = {
-    (Source.fromPublisher(source), BidiFlow.fromFlows(incoming, outgoing))
+    (Source.fromPublisher(source), BidiFlow.fromFlows(upstreamFlow, downstreamFlow))
   }
 
   /**
