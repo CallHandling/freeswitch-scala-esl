@@ -1,13 +1,16 @@
+import OutboundTest.logger
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
 import esl.InboundServer
-import esl.domain.FSMessage
+import esl.domain.{EventNames, FSMessage}
+import org.apache.logging.log4j.scala.Logging
 
 import scala.concurrent.duration._
+import scala.util.{Failure, Success}
 
 
-object InboundTest extends App {
+object InboundTest extends App with Logging {
   implicit val system = ActorSystem()
   implicit val mater = ActorMaterializer()
   implicit val ec = system.dispatcher
@@ -15,15 +18,20 @@ object InboundTest extends App {
   InboundServer("localhost", 8021).connect("ClueCon") {
     fsConnection =>
       fsConnection.onComplete {
-        f =>
-          println("Client authenticate successfully"+f)
-        //f.subscribeEvents(EventNames.All)
+        case Success(conn) =>
+          conn.subscribeEvents(EventNames.All).foreach {
+            _ =>
+              conn.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav").foreach {
+                commandResponse =>
+                  commandResponse.commandReply.foreach(f => logger.info(s"Got command reply: ${f}"))
+                  commandResponse.executeEvent.foreach(f => logger.info(s"Got ChannelExecute event: ${f}"))
+                  commandResponse.executeComplete.foreach(f => logger.info(s"ChannelExecuteComplete event: ${f}"))
+              }
+          }
+        case Failure(ex) => logger.info("failed to make inbound socket connection", ex)
       }
-      Sink.foreach[List[FSMessage]] {
-        fsMessages =>
-        // fs
-      }
+      Sink.foreach[List[FSMessage]] { fsMessages => logger.info(fsMessages) }
   }.onComplete {
-    f => println(":::"+f)
+    case result => logger.info(s"Stream completed with result ${result}")
   }
 }

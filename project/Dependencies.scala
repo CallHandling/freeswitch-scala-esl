@@ -35,7 +35,7 @@ object Dependencies {
   } ++
     Seq(
       "com.lmax" % "disruptor" % "3.3.6",
-      "org.apache.logging.log4j" %% "log4j-api-scala" % "11.0-SNAPSHOT"
+      "org.apache.logging.log4j" %% "log4j-api-scala" % "11.0"
     )
 
   val scalaTest = Seq(

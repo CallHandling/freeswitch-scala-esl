@@ -233,7 +233,7 @@ object CallCommands {
     * @param config :ApplicationCommandConfig
     */
   final case class DeleteFilter(events: Map[EventName, String], config: ApplicationCommandConfig) extends FSCommand {
-    override def toString: String = s"filter delete ${events.map { case (key, value) => s"${key.name} $value" }.mkString(" ")}$MESSAGE_TERMINATOR"
+    override def toString: String = s"filter delete ${events.map { case (key, value) => s"$value ${key.name}" }.mkString(" ")}$MESSAGE_TERMINATOR"
   }
 
   /**

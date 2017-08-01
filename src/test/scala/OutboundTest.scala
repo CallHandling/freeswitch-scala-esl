@@ -32,24 +32,19 @@ object OutboundTest extends App with Logging {
             _ =>
               conn.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav").foreach {
                 commandResponse =>
-                  commandResponse.commandReply.foreach {
-                    commandReply => println("Got reply of FS command" + commandReply)
-                  }
-                  commandResponse.executeEvent.foreach {
-                    eventMessage => println("Got CHANNEL_EXECUTE event" + eventMessage)
-                  }
-                  commandResponse.executeComplete.foreach {
-                    eventMessage => println("Got CHANNEL_EXECUTE_COMPLETE event" + eventMessage)
-                  }
+                  commandResponse.commandReply.foreach(f => logger.info(s"Got command reply: ${f}"))
+                  commandResponse.executeEvent.foreach(f => logger.info(s"Got ChannelExecute event: ${f}"))
+                  commandResponse.executeComplete.foreach(f => logger.info(s"ChannelExecuteComplete event: ${f}"))
               }
           }
-
-        case Failure(ex) => logger.info("failed to make connection", ex)
+        case Failure(ex) => logger.info("failed to make outbound socket connection", ex)
       }
       Sink.foreach[List[FSMessage]] { fsMessages => logger.info(fsMessages) }
     },
     result => result onComplete {
-      case resultTry => logger.info(s"Connection is closed ${resultTry}")
+      case resultTry => logger.info(s"Connection has closed with result${resultTry}")
     }
-  )
+  ).onComplete {
+    case result => logger.info(s"Stream completed with result ${result}")
+  }
 }

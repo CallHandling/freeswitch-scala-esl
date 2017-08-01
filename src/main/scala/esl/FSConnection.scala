@@ -391,16 +391,6 @@ trait FSConnection extends Logging {
   def subscribeEvents(events: EventName*): Future[CommandResponse] = publishCommand(SubscribeEvents(events.toList))
 
   /**
-    * Speak a phrase of text using a predefined phrase macro
-    *
-    * @param variableName : String variable name
-    * @param config       : ApplicationCommandConfig
-    * @return Future[CommandResponse]
-    */
-  def phrase(variableName: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
-    publishCommand(Phrase(variableName, config))
-
-  /**
     * Pause the channel for a given number of milliseconds, consuming the audio for that period of time.
     * Calling sleep also will consume any outstanding RTP on the operating system's input queue,
     * which can be very useful in situations where audio becomes backlogged.
@@ -432,7 +422,7 @@ trait FSConnection extends Logging {
     * @param config : ApplicationCommandConfig
     * @return Future[CommandResponse]
     */
-  def preAnswer(config: ApplicationCommandConfig): Future[CommandResponse] =
+  def preAnswer(config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(PreAnswer(config))
 
   /**
