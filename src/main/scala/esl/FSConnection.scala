@@ -114,7 +114,7 @@ trait FSConnection extends Logging {
   def init[FS <: FSConnection](fsConnectionPromise: Promise[FS],
                                fsConnection: FS,
                                fun: (Future[FS]) => Sink[List[FSMessage], _],
-                               timeout: FiniteDuration): Sink[List[FSMessage], NotUsed] = {
+                               timeout: FiniteDuration): Sink[List[FSMessage], _] = {
     var hasConnected = false
     lazy val timeoutFuture = after(duration = timeout, using = system.scheduler) {
       Future.failed(new TimeoutException(s"Socket doesn't receive any response within $timeout."))

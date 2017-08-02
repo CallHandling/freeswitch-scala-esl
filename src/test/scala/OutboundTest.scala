@@ -26,14 +26,21 @@ object OutboundTest extends App with Logging {
 
   OutboundServer("127.0.0.1", 8084).startWith(
     fsConnection => {
+      /** Outbound fsConnection future will get complete when `connect` command get response from freeswitch */
       fsConnection.onComplete {
         case Success(conn) =>
           conn.subscribeEvents(EventNames.All).foreach {
             _ =>
               conn.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav").foreach {
                 commandResponse =>
+
+                  /** This future will get complete, when FS send command/reply message to the socket */
                   commandResponse.commandReply.foreach(f => logger.info(s"Got command reply: ${f}"))
+
+                  /** This future will get complete, when FS send CHANNEL_EXECUTE event to the socket */
                   commandResponse.executeEvent.foreach(f => logger.info(s"Got ChannelExecute event: ${f}"))
+
+                  /** This future will get complete, when FS send CHANNEL_EXECUTE_COMPLETE  event to the socket */
                   commandResponse.executeComplete.foreach(f => logger.info(s"ChannelExecuteComplete event: ${f}"))
               }
           }
@@ -42,9 +49,11 @@ object OutboundTest extends App with Logging {
       Sink.foreach[List[FSMessage]] { fsMessages => logger.info(fsMessages) }
     },
     result => result onComplete {
-      case resultTry => logger.info(s"Connection has closed with result${resultTry}")
+      case Success(conn) => logger.info(s"Connection has closed successfully ${conn.localAddress}")
+      case Failure(ex) => logger.info(s"Failed to close connection: ${ex}")
     }
   ).onComplete {
-    case result => logger.info(s"Stream completed with result ${result}")
+    case Success(result) => logger.info(s"Stream completed with result ${result}")
+    case Failure(ex) => logger.info(s"Stream failed with exception ${ex}")
   }
 }

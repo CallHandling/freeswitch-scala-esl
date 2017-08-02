@@ -1,4 +1,3 @@
-import OutboundTest.logger
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
@@ -17,14 +16,20 @@ object InboundTest extends App with Logging {
   implicit val timeout = Duration(5, SECONDS)
   InboundServer("localhost", 8021).connect("ClueCon") {
     fsConnection =>
+      /**Inbound fsConnection future will get complete when client is authorised by freeswitch*/
       fsConnection.onComplete {
         case Success(conn) =>
           conn.subscribeEvents(EventNames.All).foreach {
             _ =>
               conn.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav").foreach {
                 commandResponse =>
+                  /**This future will get complete, when FS send command/reply message to the socket*/
                   commandResponse.commandReply.foreach(f => logger.info(s"Got command reply: ${f}"))
+
+                  /**This future will get complete, when FS send CHANNEL_EXECUTE event to the socket*/
                   commandResponse.executeEvent.foreach(f => logger.info(s"Got ChannelExecute event: ${f}"))
+
+                  /**This future will get complete, when FS send CHANNEL_EXECUTE_COMPLETE  event to the socket*/
                   commandResponse.executeComplete.foreach(f => logger.info(s"ChannelExecuteComplete event: ${f}"))
               }
           }
@@ -32,6 +37,7 @@ object InboundTest extends App with Logging {
       }
       Sink.foreach[List[FSMessage]] { fsMessages => logger.info(fsMessages) }
   }.onComplete {
-    case result => logger.info(s"Stream completed with result ${result}")
+    case Success(result) => logger.info(s"Stream completed with result ${result}")
+    case Failure(ex) => logger.info(s"Stream failed with exception ${ex}")
   }
 }
