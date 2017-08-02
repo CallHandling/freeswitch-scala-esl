@@ -8,9 +8,10 @@ import esl.FSConnection
 import esl.domain.CallCommands.PlayFile
 import esl.domain._
 import esl.parser.TestMessages
-import scala.concurrent.duration._
-import scala.concurrent.duration.Duration
-import scala.concurrent.{ExecutionContext, Future}
+
+import scala.collection.immutable
+import scala.concurrent.duration.{Duration, _}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
   with EslTestKit {
@@ -89,11 +90,30 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
+    "transfer function should generate FS transfer command with eventLock" in new FSConnectionFixture {
+      val channelUuid = java.util.UUID.randomUUID().toString
+      val commandResponse = connection.transfer("user/1000", ApplicationCommandConfig(channelUuid, true, 2, true))
+      whenReady(commandResponse) {
+        response =>
+          val fSCommand = s"sendmsg ${channelUuid}\nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: transfer\nevent-lock: true\nloops: 2\nasync: true\ncontent-type: text/plain\ncontent-length: 9\n\nuser/1000\n"
+          response.command.toString shouldBe fSCommand
+      }
+    }
+
     "hangup function should generate FS hangup command" in new FSConnectionFixture {
       val commandResponse = connection.hangup()
       whenReady(commandResponse) {
         response =>
           val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: hangup\n"
+          response.command.toString shouldBe fSCommand
+      }
+    }
+
+    "hangup function should generate FS hangup command with cause" in new FSConnectionFixture {
+      val commandResponse = connection.hangup(Some(HangupCauses.CallRejected))
+      whenReady(commandResponse) {
+        response =>
+          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: hangup\ncontent-type: text/plain\ncontent-length: 13\n\nCALL_REJECTED\n"
           response.command.toString shouldBe fSCommand
       }
     }
@@ -164,11 +184,20 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "bridge function should generate FS bridge command" in new FSConnectionFixture {
-      val commandResponse = connection.bridge(List("user/5000"), AllAtOnce)
+    "bridge function should generate FS bridge command to dial multiple contacts all at once " in new FSConnectionFixture {
+      val commandResponse = connection.bridge(List("user/5000", "user/5001"), AllAtOnce)
       whenReady(commandResponse) {
         response =>
-          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: bridge\ncontent-type: text/plain\ncontent-length: 9\n\nuser/5000\n"
+          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: bridge\ncontent-type: text/plain\ncontent-length: 19\n\nuser/5000,user/5001\n"
+          response.command.toString shouldBe fSCommand
+      }
+    }
+
+    "bridge function should generate FS bridge command to dial multiple contacts one at a time" in new FSConnectionFixture {
+      val commandResponse = connection.bridge(List("user/5000", "user/5001"), OneAtATime)
+      whenReady(commandResponse) {
+        response =>
+          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: bridge\ncontent-type: text/plain\ncontent-length: 19\n\nuser/5000|user/5001\n"
           response.command.toString shouldBe fSCommand
       }
     }
@@ -261,11 +290,20 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "sendDtmf function should generate FS sendDtmf command" in new FSConnectionFixture {
+    "sendDtmf function should generate FS sendDtmf command, If no duration is specified the default DTMF length of 2000ms" in new FSConnectionFixture {
       val commandResponse = connection.sendDtmf("0123456789ABCD*#@100")
       whenReady(commandResponse) {
         response =>
           val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: send_dtmf\ncontent-type: text/plain\ncontent-length: 20\n\n0123456789ABCD*#@100\n"
+          response.command.toString shouldBe fSCommand
+      }
+    }
+
+    "sendDtmf function should generate FS sendDtmf command with duration" in new FSConnectionFixture {
+      val commandResponse = connection.sendDtmf("0123456789ABCD*#@100", Some(Duration(400, MILLISECONDS)))
+      whenReady(commandResponse) {
+        response =>
+          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: send_dtmf\ncontent-type: text/plain\ncontent-length: 24\n\n0123456789ABCD*#@100@400\n"
           response.command.toString shouldBe fSCommand
       }
     }

@@ -17,10 +17,9 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.stream.{ActorMaterializer, QueueOfferResult}
+import akka.stream.ActorMaterializer
+import esl.FSConnection.CommandResponse
 import esl.domain.CallCommands._
-import esl.domain.CommandReply
-import esl.domain.EventNames.EventName
 
 import scala.concurrent.Future
 
@@ -31,9 +30,9 @@ case class OutboundFSConnection()(implicit actorSystem: ActorSystem, actorMateri
 
   /**
     * Connect with freeswitch by sending `connect` command
-    * @return
+    * @return Future[CommandResponse]
     */
-  def connect(): Future[QueueOfferResult] = queue.offer(ConnectCommand)
+  def connect(): Future[CommandResponse] = sendCommand(ConnectCommand)
 
 
 }

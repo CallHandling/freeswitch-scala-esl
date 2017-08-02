@@ -17,9 +17,9 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.stream.{ActorMaterializer, QueueOfferResult}
-import esl.domain.CallCommands.{AuthCommand, SubscribeMyEvents}
-import esl.domain.CommandReply
+import akka.stream.ActorMaterializer
+import esl.FSConnection.CommandResponse
+import esl.domain.CallCommands.AuthCommand
 
 import scala.concurrent.Future
 
@@ -32,7 +32,7 @@ case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMateria
     * Send auth command to freeswitch
     *
     * @param password : String
-    * @return
+    * @return Future[CommandResponse]
     */
-  def connect(password: String): Future[QueueOfferResult] = queue.offer(AuthCommand(password))
+  def connect(password: String): Future[CommandResponse] = sendCommand(AuthCommand(password))
 }
