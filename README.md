@@ -1,4 +1,4 @@
-# freeswitch-scala-esl - Not yes used in production
+# freeswitch-scala-esl - Not yet used in production
 A reactive event socket library for FreeSwitch written using Scala and Akka Streams
 
 This library is intended to make the use of FreeSwitch easier for Scala developers. As a second phase we will consider writing a mod for FreeSwitch which supports reactive integration including backpressure et al. 
