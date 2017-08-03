@@ -42,7 +42,7 @@ OutboundServer("127.0.0.1", 8084).startWith(
         conn.subscribeEvents(EventNames.All).foreach {
           _ =>
             /** commands that exzecute applicaitons will return a ComandResponse which has 3 futures. See below: */
-            conn.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav").foreach {    
+            conn.play("<filepath>").foreach {    
               commandResponse =>
                 /** This future will complete when FreeSwitch sends command/reply message to the socket. 
                 It will be Success or Failure based on the response from FreeSwitch*/
