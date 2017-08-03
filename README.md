@@ -29,20 +29,18 @@ implicit val system = ActorSystem("esl-system")
 implicit val actorMaterializer = ActorMaterializer()
 implicit val ec = system.dispatcher
 
-//just a sample timeout value
-implicit val timeout = Duration(2, SECONDS)
-
 OutboundServer("127.0.0.1", 8084).startWith(
-  fsConnection => {
+  fsSocket => {
     /** For each outbound connection from freeswitch you will get a future named here 'fsConnection' this future will complete when we get a response from freeswitch to a connect command that is sent automatically by the library. */
-    fsConnection.onComplete {
-      case Success(conn) =>
+    fsSocket.onComplete {
+      case Success(socket) =>
         /** every command you send will return a future of the result from freeswitch, we just use foreach to get in to 
         the future success here, you can use the future however you like including adding an onComplete callback*/
-        conn.subscribeEvents(EventNames.All).foreach {
+        val uuid = socket.reply.headers.get(HeaderNames.uniqueId).getOrElse("")
+        socket.fsConnection.subscribeMyEvents(uuid).foreach {
           _ =>
             /** commands that exzecute applicaitons will return a ComandResponse which has 3 futures. See below: */
-            conn.play("<filepath>").foreach {    
+            socket.fsConnection.play("<filepath>").foreach {    
               commandResponse =>
                 /** This future will complete when FreeSwitch sends command/reply message to the socket. 
                 It will be Success or Failure based on the response from FreeSwitch*/
@@ -68,8 +66,8 @@ OutboundServer("127.0.0.1", 8084).startWith(
     case Failure(ex) => logger.info(s"Connection with freeswitch closed with exception: ${ex}")
   }
 ).onComplete {
-  case Success(result) => logger.info(s"TCP Listener Closed succesfully ${result}")
-  case Failure(ex) => logger.info(s"TCP Listener Closed with exception  ${ex}")
+  case Success(result) => logger.info(s"TCP Listener started successfully ${result}")
+  case Failure(ex) => logger.info(s"TCP Listener Failed to start ${ex}")
 }
 ```
 
@@ -91,17 +89,16 @@ import scala.util.{Failure, Success}
 implicit val system = ActorSystem()
 implicit val mater = ActorMaterializer()
 implicit val ec = system.dispatcher
-implicit val timeout = Duration(5, SECONDS)
 
 InboundServer("localhost", 8021).connect("ClueCon") {
-  fsConnection =>
+  fSSocket =>
     /**Inbound fsConnection future will get completed when client is authorised by freeswitch*/
-    fsConnection.onComplete {
-      case Success(conn) =>
+    fSSocket.onComplete {
+      case Success(socket) =>
         /** You can also subscribe to individual events by separating with a comma in to the subscribeEvents params**/
-        conn.subscribeEvents(EventNames.All).foreach {
+        socket.fsConnection.subscribeEvents(EventNames.All).foreach {
           _ =>
-            conn.play("<filepath>").foreach {
+            socket.fsConnection.play("<filepath>").foreach {
               commandResponse =>
                 commandResponse.commandReply.foreach(f => logger.info(s"Got command reply: ${f}"))
 
@@ -114,8 +111,8 @@ InboundServer("localhost", 8021).connect("ClueCon") {
     }
     Sink.foreach[List[FSMessage]] { fsMessages => logger.info(fsMessages) }
 }.onComplete {
-  case Success(result) => logger.info(s"Stream completed with result ${result}")
-  case Failure(ex) => logger.info(s"Stream failed with exception ${ex}")
+  case Success(result) => logger.info(s"Inbound socket started successfully ${result}")
+  case Failure(ex) => logger.info(s"Inbound socket failed to start with exception ${ex}")
 }
 ```
 

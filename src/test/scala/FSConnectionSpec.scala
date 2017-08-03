@@ -9,9 +9,8 @@ import esl.domain.CallCommands.PlayFile
 import esl.domain._
 import esl.parser.TestMessages
 
-import scala.collection.immutable
 import scala.concurrent.duration.{Duration, _}
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future}
 
 class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
   with EslTestKit {
@@ -72,7 +71,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
   }
 
   "FS helper functions" should {
-    "play function should generate FS playback command" in new FSConnectionFixture {
+    "generate FS playback command" in new FSConnectionFixture {
       val commandResponse = connection.play("/usr/share/freeswitch/sounds/en/us/callie/voicemail/8000/vm-tutorial_change_pin.wav")
       whenReady(commandResponse) {
         response =>
@@ -81,7 +80,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "transfer function should generate FS transfer command" in new FSConnectionFixture {
+    "generate FS transfer command" in new FSConnectionFixture {
       val commandResponse = connection.transfer("user/1000")
       whenReady(commandResponse) {
         response =>
@@ -90,7 +89,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "transfer function should generate FS transfer command with eventLock" in new FSConnectionFixture {
+    "generate FS transfer command with eventLock" in new FSConnectionFixture {
       val channelUuid = java.util.UUID.randomUUID().toString
       val commandResponse = connection.transfer("user/1000", ApplicationCommandConfig(channelUuid, true, 2, true))
       whenReady(commandResponse) {
@@ -100,7 +99,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "hangup function should generate FS hangup command" in new FSConnectionFixture {
+    "generate FS hangup command" in new FSConnectionFixture {
       val commandResponse = connection.hangup()
       whenReady(commandResponse) {
         response =>
@@ -109,7 +108,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "hangup function should generate FS hangup command with cause" in new FSConnectionFixture {
+    "generate FS hangup command with cause" in new FSConnectionFixture {
       val commandResponse = connection.hangup(Some(HangupCauses.CallRejected))
       whenReady(commandResponse) {
         response =>
@@ -118,7 +117,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "break function should generate FS break command" in new FSConnectionFixture {
+    "generate FS break command" in new FSConnectionFixture {
       val commandResponse = connection.break()
       whenReady(commandResponse) {
         response =>
@@ -127,7 +126,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "answer function should generate FS answer command" in new FSConnectionFixture {
+    "FS answer command" in new FSConnectionFixture {
       val commandResponse = connection.answer()
       whenReady(commandResponse) {
         response =>
@@ -136,7 +135,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "sendCommand function should send any FS command" in new FSConnectionFixture {
+    "send any FS command" in new FSConnectionFixture {
       val fsCmd = PlayFile("/usr/share/freeswitch/sounds/en/us/callie/voicemail/8000/vm-tutorial_change_pin.wav",
         ApplicationCommandConfig())
       val commandResponse = connection.sendCommand(fsCmd)
@@ -147,7 +146,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "sendCommand function should send plain FS command" in new FSConnectionFixture {
+    "send plain FS command" in new FSConnectionFixture {
       val uuid = java.util.UUID.randomUUID().toString
       val plainCommand = s"sendmsg \nEvent-UUID: $uuid\ncall-command: execute\nexecute-app-name: playback\ncontent-type: text/plain\ncontent-length: 83\n\n/usr/share/freeswitch/sounds/en/us/callie/voicemail/8000/vm-tutorial_change_pin.wav\n"
       val commandResponse = connection.sendCommand(plainCommand, uuid)
@@ -157,7 +156,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "filter function should generate FS filter command" in new FSConnectionFixture {
+    "generate FS filter command" in new FSConnectionFixture {
       val commandResponse = connection.filter(Map(EventNames.ChannelExecute -> HeaderNames.eventName))
       whenReady(commandResponse) {
         response =>
@@ -166,7 +165,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "deleteFilter function should generate FS deleteFilter command" in new FSConnectionFixture {
+    "generate FS deleteFilter command" in new FSConnectionFixture {
       val commandResponse = connection.deleteFilter(Map(EventNames.Heartbeat -> HeaderNames.eventName))
       whenReady(commandResponse) {
         response =>
@@ -175,7 +174,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "attXfer function should generate FS attXfer command" in new FSConnectionFixture {
+    "generate FS attXfer command" in new FSConnectionFixture {
       val commandResponse = connection.attXfer("user/5000")
       whenReady(commandResponse) {
         response =>
@@ -184,7 +183,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "bridge function should generate FS bridge command to dial multiple contacts all at once " in new FSConnectionFixture {
+    "generate FS bridge command to dial multiple contacts all at once " in new FSConnectionFixture {
       val commandResponse = connection.bridge(List("user/5000", "user/5001"), AllAtOnce)
       whenReady(commandResponse) {
         response =>
@@ -193,7 +192,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "bridge function should generate FS bridge command to dial multiple contacts one at a time" in new FSConnectionFixture {
+    "generate FS bridge command to dial multiple contacts one at a time" in new FSConnectionFixture {
       val commandResponse = connection.bridge(List("user/5000", "user/5001"), OneAtATime)
       whenReady(commandResponse) {
         response =>
@@ -202,7 +201,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "intercept function should generate FS intercept command" in new FSConnectionFixture {
+    "generate FS intercept command" in new FSConnectionFixture {
       val uuid = java.util.UUID.randomUUID().toString
       val commandResponse = connection.intercept(uuid)
       whenReady(commandResponse) {
@@ -212,7 +211,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "read function should generate FS read command" in new FSConnectionFixture {
+    "generate FS read command" in new FSConnectionFixture {
       val commandResponse = connection.read(2, 8)(
         "/usr/share/freeswitch/sounds/en/us/callie/voicemail/8000/vm-tutorial_music.wav",
         "res",
@@ -225,7 +224,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "subscribeMyEvents function should generate FS subscribe myevents" in new FSConnectionFixture {
+    "generate FS subscribe myevents" in new FSConnectionFixture {
       val uuid = java.util.UUID.randomUUID().toString
       val commandResponse = connection.subscribeMyEvents(uuid)
       whenReady(commandResponse) {
@@ -236,7 +235,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
     }
 
 
-    "subscribeEvents function should generate FS subscribe events command" in new FSConnectionFixture {
+    "generate FS subscribe events command" in new FSConnectionFixture {
       val commandResponse = connection.subscribeEvents(EventNames.All)
       whenReady(commandResponse) {
         response =>
@@ -245,7 +244,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "sleep function should generate FS sleep events command" in new FSConnectionFixture {
+    "generate FS sleep events command" in new FSConnectionFixture {
       val commandResponse = connection.sleep(Duration(2, SECONDS))
       whenReady(commandResponse) {
         response =>
@@ -254,7 +253,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "setVar function should generate FS set command" in new FSConnectionFixture {
+    "generate FS set command" in new FSConnectionFixture {
       val commandResponse = connection.setVar("call_timeout", "10")
       whenReady(commandResponse) {
         response =>
@@ -263,7 +262,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "preAnswer function should generate FS preAnswer command" in new FSConnectionFixture {
+    "generate FS preAnswer command" in new FSConnectionFixture {
       val commandResponse = connection.preAnswer()
       whenReady(commandResponse) {
         response =>
@@ -272,7 +271,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "record function should generate FS record command" in new FSConnectionFixture {
+    "generate FS record command" in new FSConnectionFixture {
       val commandResponse = connection.record("/tmp/record.mp3", Duration(5, SECONDS), Duration(3, SECONDS))
       whenReady(commandResponse) {
         response =>
@@ -281,7 +280,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "recordSession function should generate FS recordSession command" in new FSConnectionFixture {
+    "generate FS recordSession command" in new FSConnectionFixture {
       val commandResponse = connection.recordSession("/tmp/record.mp3")
       whenReady(commandResponse) {
         response =>
@@ -290,7 +289,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "sendDtmf function should generate FS sendDtmf command, If no duration is specified the default DTMF length of 2000ms" in new FSConnectionFixture {
+    "generate FS sendDtmf command, If no duration is specified the default DTMF length of 2000ms" in new FSConnectionFixture {
       val commandResponse = connection.sendDtmf("0123456789ABCD*#@100")
       whenReady(commandResponse) {
         response =>
@@ -299,7 +298,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "sendDtmf function should generate FS sendDtmf command with duration" in new FSConnectionFixture {
+    "generate FS sendDtmf command with duration" in new FSConnectionFixture {
       val commandResponse = connection.sendDtmf("0123456789ABCD*#@100", Some(Duration(400, MILLISECONDS)))
       whenReady(commandResponse) {
         response =>
@@ -308,7 +307,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "stopRecordSession function should generate FS stopRecordSession command" in new FSConnectionFixture {
+    "generate FS stopRecordSession command" in new FSConnectionFixture {
       val commandResponse = connection.stopRecordSession("/tmp/record.mp3")
       whenReady(commandResponse) {
         response =>
@@ -317,7 +316,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "park function should generate FS park command" in new FSConnectionFixture {
+    "generate FS park command" in new FSConnectionFixture {
       val commandResponse = connection.park()
       whenReady(commandResponse) {
         response =>
@@ -326,7 +325,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "log function should generate FS log command" in new FSConnectionFixture {
+    "generate FS log command" in new FSConnectionFixture {
       val commandResponse = connection.log("DIALING Extension DialURI [${sip_uri_to_dial}]")
       whenReady(commandResponse) {
         response =>
@@ -335,7 +334,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       }
     }
 
-    "exit function should generate FS exit command" in new FSConnectionFixture {
+    "generate FS exit command" in new FSConnectionFixture {
       val commandResponse = connection.exit()
       whenReady(commandResponse) {
         response =>

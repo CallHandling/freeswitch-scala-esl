@@ -111,9 +111,9 @@ trait FSConnection extends Logging {
     * @tparam FS type of FS connection. it must be type of FSConnection
     * @return Sink[List[T], NotUsed]
     */
-  def init[FS <: FSConnection](fsConnectionPromise: Promise[FS],
+  def init[FS <: FSConnection](fsConnectionPromise: Promise[FSSocket[FS]],
                                fsConnection: FS,
-                               fun: (Future[FS]) => Sink[List[FSMessage], _],
+                               fun: (Future[FSSocket[FS]]) => Sink[List[FSMessage], _],
                                timeout: FiniteDuration): Sink[List[FSMessage], _] = {
     var hasConnected = false
     lazy val timeoutFuture = after(duration = timeout, using = system.scheduler) {
@@ -124,7 +124,7 @@ trait FSConnection extends Logging {
       messages.collectFirst {
         case command: CommandReply =>
           if (command.success) {
-            fsConnectionPromise.complete(Success(fsConnection))
+            fsConnectionPromise.complete(Success(FSSocket(fsConnection,command)))
             hasConnected = true
           } else {
             fsConnectionPromise.complete(Failure(new Exception(s"Socket failed to make connection with an error: ${command.errorMessage}")))
@@ -564,3 +564,11 @@ object FSConnection {
   }
 
 }
+
+/**
+  * FSSocket represent fs inbound/outbound socket connection and connection reply
+  * @param fsConnection type of FSConnection connection
+  * @param reply: CommandReply reply of first from fs
+  * @tparam FS
+  */
+case class FSSocket[FS<:FSConnection](fsConnection: FS, reply: CommandReply)

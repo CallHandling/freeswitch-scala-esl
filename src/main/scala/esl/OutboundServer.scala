@@ -26,13 +26,16 @@ import com.typesafe.config.Config
 import esl.domain.FSMessage
 import org.apache.logging.log4j.scala.Logging
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
+import scala.concurrent.duration.SECONDS
 
 object OutboundServer {
-  val address = "freeswitch.outbound.address"
-  val port = "freeswitch.outbound.port"
+  private val address = "freeswitch.outbound.address"
+  private val port = "freeswitch.outbound.port"
+  private val fsTimeout = "freeswitch.outbound.startup.timeout"
+  private val defaultTimeout = Duration(1, SECONDS)
 
   /**
     * Create a OutBound server with given configuration and parser
@@ -43,7 +46,7 @@ object OutboundServer {
     * @return OutboundServer
     */
   def apply(config: Config)
-           (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): OutboundServer =
+           (implicit system: ActorSystem, materializer: ActorMaterializer): OutboundServer =
     new OutboundServer(config)
 
   /**
@@ -55,20 +58,22 @@ object OutboundServer {
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(interface: String, port: Int)
-           (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): OutboundServer =
-    new OutboundServer(interface, port)
+  def apply(interface: String, port: Int, timeout: FiniteDuration = defaultTimeout)
+           (implicit system: ActorSystem, materializer: ActorMaterializer): OutboundServer =
+    new OutboundServer(interface, port, timeout)
 
 }
 
 
-class OutboundServer(address: String, port: Int)
-                    (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) extends Logging {
+class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
+                    (implicit system: ActorSystem, materializer: ActorMaterializer) extends Logging {
   implicit private val ec = system.dispatcher
 
   def this(config: Config)
-          (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) =
-    this(config.getString(OutboundServer.address), config.getInt(OutboundServer.port))
+          (implicit system: ActorSystem, materializer: ActorMaterializer) =
+    this(config.getString(OutboundServer.address),
+      config.getInt(OutboundServer.port),
+      Duration(config.getDuration(OutboundServer.fsTimeout).getSeconds, SECONDS))
 
   /** This function will start a tcp server with given Sink. any free switch messages materialize to given sink.
     * `FsConnection`'s helper function allow you to send/push message to downstream.
@@ -77,7 +82,7 @@ class OutboundServer(address: String, port: Int)
     * @param onFsConnectionClosed this function will execute when Fs connection is closed.
     * @return The stream is completed successfully or not
     */
-  def startWith(fun: Future[OutboundFSConnection] => Sink[List[FSMessage], _],
+  def startWith(fun: Future[FSSocket[OutboundFSConnection]] => Sink[List[FSMessage], _],
                 onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] =
     server(fun, fsConnection => fsConnection.handler(), onFsConnectionClosed)
 
@@ -90,7 +95,7 @@ class OutboundServer(address: String, port: Int)
     * @tparam T type of data transform into ByteString
     * @return The stream is completed successfully or not
     */
-  private[this] def server[T](fun: Future[OutboundFSConnection] => Sink[List[FSMessage], _],
+  private[this] def server[T](fun: Future[FSSocket[OutboundFSConnection]] => Sink[List[FSMessage], _],
                               flow: OutboundFSConnection => (Source[T, _], BidiFlow[ByteString, List[FSMessage], T, ByteString, NotUsed]),
                               onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] = {
     Tcp().bind(address, port).runForeach {
@@ -98,7 +103,7 @@ class OutboundServer(address: String, port: Int)
         logger.info(s"Socket connection is opened for ${connection.remoteAddress}")
         val fsConnection = OutboundFSConnection()
         fsConnection.connect().map { _ =>
-          val sink = fsConnection.init(Promise[OutboundFSConnection](), fsConnection, fun, timeout)
+          val sink = fsConnection.init(Promise[FSSocket[OutboundFSConnection]](), fsConnection, fun, timeout)
           val (source, protocol) = flow(fsConnection)
           val (_, closed: Future[Any]) = connection.flow
             .join(protocol)

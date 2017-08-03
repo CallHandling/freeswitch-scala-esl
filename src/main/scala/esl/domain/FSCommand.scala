@@ -47,7 +47,8 @@ sealed trait FSExecuteApp extends FSCommand {
 
 /**
   *
-  * @param channelUuid The uuid of the channel to execute the application command on, not required in outbound mode if you want to effect the outbound channel
+  * @param channelUuid The uuid of the channel to execute the application command on,
+  *                    not required in outbound mode if you want to effect the outbound channel
   * @param eventLock   Force application to complete before next command is parsed
   * @param loops       Number of times to invoke the command, default 1
   * @param async       Set the execution mode to async, has no effect in Outbound async mode

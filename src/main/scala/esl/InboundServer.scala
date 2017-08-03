@@ -29,8 +29,10 @@ import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 
 object InboundServer {
-  val address = "freeswitch.inbound.address"
-  val port = "freeswitch.inbound.port"
+  private val address = "freeswitch.inbound.address"
+  private val port = "freeswitch.inbound.port"
+  private val fsTimeout = "freeswitch.inbound.startup.timeout"
+  private val defaultTimeout = Duration(1, SECONDS)
 
   /**
     * Create a inbound client for a given configuration and parser
@@ -41,7 +43,7 @@ object InboundServer {
     * @return OutboundServer
     */
   def apply(config: Config)
-           (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): InboundServer =
+           (implicit system: ActorSystem, materializer: ActorMaterializer): InboundServer =
     new InboundServer(config)
 
   /**
@@ -53,29 +55,21 @@ object InboundServer {
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(interface: String, port: Int)
-           (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): InboundServer =
-    new InboundServer(interface, port)
+  def apply(interface: String, port: Int, timeout: FiniteDuration = defaultTimeout)
+           (implicit system: ActorSystem, materializer: ActorMaterializer): InboundServer =
+    new InboundServer(interface, port, timeout)
 
-  /**
-    * This will create a OutBound server for localhost's default free switch server
-    *
-    * @param parser       : Parser it will parse any incoming packet into Free switch messages
-    * @param system       : ActorSystem
-    * @param materializer : ActorMaterializer
-    * @return OutboundServer
-    */
-  def apply(parser: Parser)(implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration): InboundServer =
-    new InboundServer(interface = "localhost", port = 8021)
 }
 
-class InboundServer(interface: String, port: Int)
-                   (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) {
+class InboundServer(interface: String, port: Int, timeout: FiniteDuration)
+                   (implicit system: ActorSystem, materializer: ActorMaterializer) {
   implicit private val ec = system.dispatcher
 
   def this(config: Config)
-          (implicit system: ActorSystem, materializer: ActorMaterializer, timeout: FiniteDuration) =
-    this(config.getString(InboundServer.address), config.getInt(InboundServer.port))
+          (implicit system: ActorSystem, materializer: ActorMaterializer) =
+    this(config.getString(InboundServer.address),
+      config.getInt(InboundServer.port),
+      Duration(config.getDuration(InboundServer.fsTimeout).getSeconds, SECONDS))
 
   /**
     * Open a client connection for given interface and port
@@ -103,10 +97,10 @@ class InboundServer(interface: String, port: Int)
     * @param fun      function will get freeswitch outbound connection after injecting sink
     * @return Future[(Any, Any)]
     */
-  def connect(password: String)(fun: Future[InboundFSConnection] => Sink[List[FSMessage], _]): Future[(Any, Any)] = {
+  def connect(password: String)(fun: Future[FSSocket[InboundFSConnection]] => Sink[List[FSMessage], _]): Future[(Any, Any)] = {
     val fsConnection = InboundFSConnection()
     fsConnection.connect(password).map { _ =>
-      val sink = fsConnection.init(Promise[InboundFSConnection](), fsConnection, fun, timeout)
+      val sink = fsConnection.init(Promise[FSSocket[InboundFSConnection]](), fsConnection, fun, timeout)
       client(sink, fsConnection.handler())
     }
   }

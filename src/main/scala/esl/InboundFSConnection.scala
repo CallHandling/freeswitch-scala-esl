@@ -19,6 +19,7 @@ package esl
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import esl.FSConnection.CommandResponse
+import esl.domain.ApplicationCommandConfig
 import esl.domain.CallCommands.AuthCommand
 
 import scala.concurrent.Future
@@ -35,4 +36,6 @@ case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMateria
     * @return Future[CommandResponse]
     */
   def connect(password: String): Future[CommandResponse] = sendCommand(AuthCommand(password))
+
+  override def play(fileName: String, config: ApplicationCommandConfig): Future[CommandResponse] = super.play(fileName, config)
 }
