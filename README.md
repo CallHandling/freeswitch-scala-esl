@@ -101,7 +101,7 @@ InboundServer("localhost", 8021).connect("ClueCon") {
         /** You can also subscribe to individual events by separating with a comma in to the subscribeEvents params**/
         conn.subscribeEvents(EventNames.All).foreach {
           _ =>
-            conn.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav").foreach {
+            conn.play("<filepath>").foreach {
               commandResponse =>
                 commandResponse.commandReply.foreach(f => logger.info(s"Got command reply: ${f}"))
 
