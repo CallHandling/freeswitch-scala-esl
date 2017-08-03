@@ -29,10 +29,8 @@ implicit val system = ActorSystem("esl-system")
 implicit val actorMaterializer = ActorMaterializer()
 implicit val ec = system.dispatcher
 
-//just a sample timeout value
-implicit val timeout = Duration(2, SECONDS)
-
-OutboundServer("127.0.0.1", 8084).startWith(
+ /** host, port and timeout duration (default 1 second) **/
+OutboundServer("127.0.0.1", 8084, Duration(1, SECONDS)).startWith(
   fsConnection => {
     /** For each outbound connection from freeswitch you will get a future named here 'fsConnection' this future will complete when we get a response from freeswitch to a connect command that is sent automatically by the library. */
     fsConnection.onComplete {
@@ -91,9 +89,9 @@ import scala.util.{Failure, Success}
 implicit val system = ActorSystem()
 implicit val mater = ActorMaterializer()
 implicit val ec = system.dispatcher
-implicit val timeout = Duration(5, SECONDS)
 
-InboundServer("localhost", 8021).connect("ClueCon") {
+
+InboundServer("localhost", 8021, Duration(1, SECONDS)).connect("ClueCon") {
   fsConnection =>
     /**Inbound fsConnection future will get completed when client is authorised by freeswitch*/
     fsConnection.onComplete {
