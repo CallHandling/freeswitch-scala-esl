@@ -29,6 +29,7 @@ implicit val system = ActorSystem("esl-system")
 implicit val actorMaterializer = ActorMaterializer()
 implicit val ec = system.dispatcher
 
+/** host, port and timeout duration (default 1 second) **/
 OutboundServer("127.0.0.1", 8084).startWith(
   fsSocket => {
     /** For each outbound connection from freeswitch you will get a future named here 'fsConnection' this future will complete when we get a response from freeswitch to a connect command that is sent automatically by the library. */
