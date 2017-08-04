@@ -1,7 +1,7 @@
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
-import esl.OutboundServer
+import esl.{FSConnection, OutboundServer}
 import esl.domain._
 import org.apache.logging.log4j.scala.Logging
 
@@ -19,12 +19,12 @@ object OutboundTest extends App with Logging {
   implicit val ec = system.dispatcher
 
   OutboundServer("127.0.0.1", 8084).startWith(
-    fsSocket => {
+    infantFSSocket => {
       /** Outbound fsConnection future will get complete when `connect` command get response from freeswitch */
-      fsSocket.onComplete {
-        case Success(socket) =>
-          val uuid = socket.reply.headers.get(HeaderNames.uniqueId).getOrElse("")
-          socket.fsConnection.subscribeMyEvents(uuid).foreach {
+      infantFSSocket.onComplete {
+        case Success(fsSocket) =>
+          val socket = fsSocket.attachSink(Sink.foreach[(FSConnection, List[FSMessage])](f => logger.info(f)))
+          socket.fsConnection.subscribeMyEvents(socket.commandReply.headers.get(HeaderNames.uniqueId).getOrElse("")).foreach {
             _ =>
               socket.fsConnection.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav").foreach {
                 commandResponse =>
@@ -41,7 +41,6 @@ object OutboundTest extends App with Logging {
           }
         case Failure(ex) => logger.info("failed to make outbound socket connection", ex)
       }
-      Sink.foreach[List[FSMessage]] { fsMessages => logger.info(fsMessages) }
     },
     result => result onComplete {
       case Success(conn) => logger.info(s"Connection has closed successfully ${conn.localAddress}")

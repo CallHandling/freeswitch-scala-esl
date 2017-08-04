@@ -19,17 +19,16 @@ package esl
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Tcp.IncomingConnection
-import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
+import akka.stream.scaladsl.{BidiFlow, Source, Tcp}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
 import com.typesafe.config.Config
 import esl.domain.FSMessage
 import org.apache.logging.log4j.scala.Logging
 
-import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.concurrent.duration.{Duration, FiniteDuration, SECONDS}
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
-import scala.concurrent.duration.SECONDS
 
 object OutboundServer {
   private val address = "freeswitch.outbound.address"
@@ -82,7 +81,7 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
     * @param onFsConnectionClosed this function will execute when Fs connection is closed.
     * @return The stream is completed successfully or not
     */
-  def startWith(fun: Future[FSSocket[OutboundFSConnection]] => Sink[List[FSMessage], _],
+  def startWith(fun: Future[InfantFSSocket[OutboundFSConnection]] => Unit,
                 onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] =
     server(fun, fsConnection => fsConnection.handler(), onFsConnectionClosed)
 
@@ -95,7 +94,7 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
     * @tparam T type of data transform into ByteString
     * @return The stream is completed successfully or not
     */
-  private[this] def server[T](fun: Future[FSSocket[OutboundFSConnection]] => Sink[List[FSMessage], _],
+  private[this] def server[T](fun: Future[InfantFSSocket[OutboundFSConnection]] => Unit,
                               flow: OutboundFSConnection => (Source[T, _], BidiFlow[ByteString, List[FSMessage], T, ByteString, NotUsed]),
                               onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] = {
     Tcp().bind(address, port).runForeach {
@@ -103,7 +102,7 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
         logger.info(s"Socket connection is opened for ${connection.remoteAddress}")
         val fsConnection = OutboundFSConnection()
         fsConnection.connect().map { _ =>
-          val sink = fsConnection.init(Promise[FSSocket[OutboundFSConnection]](), fsConnection, fun, timeout)
+          val sink = fsConnection.init(Promise[InfantFSSocket[OutboundFSConnection]](), fsConnection, fun, timeout)
           val (source, protocol) = flow(fsConnection)
           val (_, closed: Future[Any]) = connection.flow
             .join(protocol)

@@ -45,6 +45,11 @@ trait FSConnection extends Logging {
   private[this] var unParsedBuffer = ""
   private[this] val bgapiMap: mutable.Map[String, Promise[CommandReply]] = mutable.Map.empty
 
+  private[this] var anotherSink: Option[Sink[List[FSMessage], _]] = Option.empty
+
+  def attachSink(sink: Sink[List[FSMessage], _]): Unit =
+    if (anotherSink.isEmpty) anotherSink = Some(sink)
+
   /**
     * This queue maintain the promise of CommandReply for each respective FSCommand
     */
@@ -111,9 +116,9 @@ trait FSConnection extends Logging {
     * @tparam FS type of FS connection. it must be type of FSConnection
     * @return Sink[List[T], NotUsed]
     */
-  def init[FS <: FSConnection](fsConnectionPromise: Promise[FSSocket[FS]],
+  def init[FS <: FSConnection](fsConnectionPromise: Promise[InfantFSSocket[FS]],
                                fsConnection: FS,
-                               fun: (Future[FSSocket[FS]]) => Sink[List[FSMessage], _],
+                               fun: (Future[InfantFSSocket[FS]]) => Unit,
                                timeout: FiniteDuration): Sink[List[FSMessage], _] = {
     var hasConnected = false
     lazy val timeoutFuture = after(duration = timeout, using = system.scheduler) {
@@ -124,7 +129,7 @@ trait FSConnection extends Logging {
       messages.collectFirst {
         case command: CommandReply =>
           if (command.success) {
-            fsConnectionPromise.complete(Success(FSSocket(fsConnection,command)))
+            fsConnectionPromise.complete(Success(InfantFSSocket(fsConnection, command)))
             hasConnected = true
           } else {
             fsConnectionPromise.complete(Failure(new Exception(s"Socket failed to make connection with an error: ${command.errorMessage}")))
@@ -132,10 +137,11 @@ trait FSConnection extends Logging {
       }
       messages
     }
+    fun(fsConnectionFuture)
     Flow[List[FSMessage]].map { fsMessages =>
       if (!hasConnected) connectToFS(fsMessages)
       else fsMessages.map(handleFSMessage)
-    }.to(fun(fsConnectionFuture))
+    }.to(anotherSink.getOrElse(Sink.ignore))
   }
 
   /**
@@ -564,11 +570,3 @@ object FSConnection {
   }
 
 }
-
-/**
-  * FSSocket represent fs inbound/outbound socket connection and connection reply
-  * @param fsConnection type of FSConnection connection
-  * @param reply: CommandReply reply of first from fs
-  * @tparam FS
-  */
-case class FSSocket[FS<:FSConnection](fsConnection: FS, reply: CommandReply)

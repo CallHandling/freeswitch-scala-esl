@@ -97,10 +97,10 @@ class InboundServer(interface: String, port: Int, timeout: FiniteDuration)
     * @param fun      function will get freeswitch outbound connection after injecting sink
     * @return Future[(Any, Any)]
     */
-  def connect(password: String)(fun: Future[FSSocket[InboundFSConnection]] => Sink[List[FSMessage], _]): Future[(Any, Any)] = {
+  def connect(password: String)(fun: Future[InfantFSSocket[InboundFSConnection]] => Unit): Future[(Any, Any)] = {
     val fsConnection = InboundFSConnection()
     fsConnection.connect(password).map { _ =>
-      val sink = fsConnection.init(Promise[FSSocket[InboundFSConnection]](), fsConnection, fun, timeout)
+      val sink = fsConnection.init(Promise[InfantFSSocket[InboundFSConnection]](), fsConnection, fun, timeout)
       client(sink, fsConnection.handler())
     }
   }
