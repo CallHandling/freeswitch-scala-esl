@@ -125,4 +125,36 @@ implicit val ec = system.dispatcher
   }
 ```
 
+Some of the commands we have already implmented, details of the funcitons and parameters etc can be found in the code base:-
+
+*Connect
+*Auth
+*subscribeEvents
+*myevents
+*filterEvents
+*Hangup
+*Break
+*Play
+*Transfer
+*Answer
+*Auth
+*SetVar
+*Attended Transfer
+*Bridge
+*Connect
+*Subscribe Events
+*Filter Events
+*Intercept
+*ReadDTMF
+*SayPhrase
+*Sleep
+*PreAnswer
+*Record
+*Record Session
+*Stop Record
+*Send DTMF
+*Park
+*Exit
+*Log
+
 
