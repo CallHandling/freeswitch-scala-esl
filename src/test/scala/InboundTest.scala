@@ -4,7 +4,7 @@ import akka.stream.scaladsl.{GraphDSL, Sink}
 import esl.FSConnection.CommandResponse
 import esl._
 import esl.domain.EventNames.{All, ChannelAnswer}
-import esl.domain.{CommandReply, EventMessage, FSMessage}
+import esl.domain.{ApplicationCommandConfig, CommandReply, EventMessage, FSMessage}
 import org.apache.logging.log4j.scala.Logging
 
 import scala.util.{Failure, Success}
@@ -18,14 +18,15 @@ object InboundTest extends App with Logging {
 
   InboundServer("localhost", 8021).connect("ClueCon") {
     infantFSSocket =>
-
-      /** Inbound fsConnection future will get complete when client is authorised by freeswitch */
+      /** Inbound fsConnection future will get completed when client is authorised by freeswitch */
       infantFSSocket.onComplete {
         case Success(fsSocket) =>
           val socket = fsSocket.attachSink(Sink.foreach[(FSConnection, List[FSMessage])] { case (fsConnection, fsMessages) =>
             fsMessages.collect {
               case event: EventMessage if event.eventName.contains(ChannelAnswer) =>
-                fsConnection.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav").foreach {
+                val uuid = event.uuid.getOrElse("")
+                fsConnection.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav",
+                  ApplicationCommandConfig(uuid)).foreach {
                   commandResponse =>
 
                     /** This future will get complete, when FS send command/reply message to the socket */
@@ -46,7 +47,7 @@ object InboundTest extends App with Logging {
         case Failure(ex) => logger.info("failed to make inbound socket connection", ex)
       }
   }.onComplete {
-    case Success(result) => logger.info(s"Server started successfully with result ${result}")
-    case Failure(ex) => logger.info(s"Server failed with exception ${ex}")
+    case Success(result) => logger.info(s"Inbound socket started successfully ${result}")
+    case Failure(ex) => logger.info(s"Inbound socket failed to start with exception ${ex}")
   }
 }

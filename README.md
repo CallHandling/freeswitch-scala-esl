@@ -31,13 +31,15 @@ implicit val ec = system.dispatcher
 
 /** host, port and timeout duration (default 1 second) **/
 OutboundServer("127.0.0.1", 8084).startWith(
-  fsSocket => {
+  infantFSSocket => {
     /** For each outbound connection from freeswitch you will get a future named here 'fsConnection' this future will complete when we get a response from freeswitch to a connect command that is sent automatically by the library. */
-    fsSocket.onComplete {
-      case Success(socket) =>
+    infantFSSocket.onComplete {
+      case Success(fsSocket) =>
+       /** You can push in a Sink of FSMessage to create a reactive pipeline for all the events coming down the socket */
+      val socket = fsSocket.attachSink(Sink.foreach[(FSConnection, List[FSMessage])](f => logger.info(f)))
         /** every command you send will return a future of the result from freeswitch, we just use foreach to get in to 
         the future success here, you can use the future however you like including adding an onComplete callback*/
-        val uuid = socket.reply.headers.get(HeaderNames.uniqueId).getOrElse("")
+        val uuid = socket.commandReply.headers.get(HeaderNames.uniqueId).getOrElse("")
         socket.fsConnection.subscribeMyEvents(uuid).foreach {
           _ =>
             /** commands that exzecute applicaitons will return a ComandResponse which has 3 futures. See below: */
@@ -57,10 +59,6 @@ OutboundServer("127.0.0.1", 8084).startWith(
        /** The connect command returned ERR from freeswitch or timed out */
       case Failure(ex) => logger.info("failed to make outbound socket connection", ex)
     }
-    /** You can push in a Sink of FSMessage to create a reactive pipeline for all the events coming down the socket */
-    Sink.foreach[List[FSMessage]] { fsMessages => 
-      logger.info(fsMessages) 
-    }    
   },
   result => result onComplete {
     case Success(conn) => logger.info(s"Connection with freeswitch closed normally ${conn.localAddress}")
@@ -91,30 +89,40 @@ implicit val system = ActorSystem()
 implicit val mater = ActorMaterializer()
 implicit val ec = system.dispatcher
 
-InboundServer("localhost", 8021).connect("ClueCon") {
-  fSSocket =>
-    /**Inbound fsConnection future will get completed when client is authorised by freeswitch*/
-    fSSocket.onComplete {
-      case Success(socket) =>
-        /** You can also subscribe to individual events by separating with a comma in to the subscribeEvents params**/
-        socket.fsConnection.subscribeEvents(EventNames.All).foreach {
-          _ =>
-            socket.fsConnection.play("<filepath>").foreach {
-              commandResponse =>
-                commandResponse.commandReply.foreach(f => logger.info(s"Got command reply: ${f}"))
+  InboundServer("localhost", 8021).connect("ClueCon") {
+    infantFSSocket =>
+      /** Inbound fsConnection future will get completed when client is authorised by freeswitch */
+      infantFSSocket.onComplete {
+        case Success(fsSocket) =>
+          val socket = fsSocket.attachSink(Sink.foreach[(FSConnection, List[FSMessage])] { case (fsConnection, fsMessages) =>
+            fsMessages.collect {
+              case event: EventMessage if event.eventName.contains(ChannelAnswer) =>
+                val uuid = event.uuid.getOrElse("")
+                fsConnection.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav",
+                  ApplicationCommandConfig(uuid)).foreach {
+                  commandResponse =>
 
-                commandResponse.executeEvent.foreach(f => logger.info(s"Got ChannelExecute event: ${f}"))
+                    /** This future will get complete, when FS send command/reply message to the socket */
+                    commandResponse.commandReply.foreach(f => logger.info(s"Got command reply: ${f}"))
 
-                commandResponse.executeComplete.foreach(f => logger.info(s"ChannelExecuteComplete event: ${f}"))
+                    /** This future will get complete, when FS send CHANNEL_EXECUTE event to the socket */
+                    commandResponse.executeEvent.foreach(f => logger.info(s"Got ChannelExecute event: ${f}"))
+
+                    /** This future will get complete, when FS send CHANNEL_EXECUTE_COMPLETE  event to the socket */
+                    commandResponse.executeComplete.foreach(f => logger.info(s"ChannelExecuteComplete event: ${f}"))
+                }
             }
-        }
-      case Failure(ex) => logger.info("failed to make inbound socket connection", ex)
-    }
-    Sink.foreach[List[FSMessage]] { fsMessages => logger.info(fsMessages) }
-}.onComplete {
-  case Success(result) => logger.info(s"Inbound socket started successfully ${result}")
-  case Failure(ex) => logger.info(s"Inbound socket failed to start with exception ${ex}")
-}
+          })
+          socket.fsConnection.subscribeEvents(All).foreach {
+            commandResponse =>
+              commandResponse.commandReply.foreach(f => logger.info(f))
+          }
+        case Failure(ex) => logger.info("failed to make inbound socket connection", ex)
+      }
+  }.onComplete {
+    case Success(result) => logger.info(s"Inbound socket started successfully ${result}")
+    case Failure(ex) => logger.info(s"Inbound socket failed to start with exception ${ex}")
+  }
 ```
 
 
