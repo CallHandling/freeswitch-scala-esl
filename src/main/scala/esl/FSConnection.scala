@@ -29,7 +29,7 @@ import esl.domain.HangupCauses.HangupCause
 import esl.domain.{ApplicationCommandConfig, FSMessage, _}
 import esl.parser.DefaultParser
 import org.apache.logging.log4j.scala.Logging
-import java.util.UUID._
+
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutException}
@@ -63,7 +63,7 @@ trait FSConnection extends Logging {
     logger.debug(s"Received data from FS:\n ${data.utf8String}")
     val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
     unParsedBuffer = buffer
-    FSData(channelId, self, messages)
+    FSData(self, messages)
   }
 
   /**
@@ -109,14 +109,13 @@ trait FSConnection extends Logging {
       fsData.fsMessages.collectFirst {
         case command: CommandReply =>
           if (command.success) {
-            channelId = command.headers.get(HeaderNames.uniqueId).fold(randomUUID().toString)(identity)
-            fsConnectionPromise.complete(Success(FSSocket(fsConnection, command)))
+            fsConnectionPromise.complete(Success(FSSocket(fsConnection, ChannelData(command.headers))))
             hasConnected = true
           } else {
             fsConnectionPromise.complete(Failure(new Exception(s"Socket failed to make connection with an error: ${command.errorMessage}")))
           }
       }
-      fsData.copy(channelId = channelId)
+      fsData
     }
     Flow[FSData].map { fSData =>
       if (!hasConnected) connectToFS(fSData)
@@ -175,6 +174,15 @@ trait FSConnection extends Logging {
     }
     eventMessage
   }
+
+  /**
+    * This function will push a command to source queue and doesn't have any mapping with this command.
+    * It is used to sending `connect` or `auth` command
+    *
+    * @param command : FSCommand
+    * @return Future[QueueOfferResult]
+    */
+  protected def publishNonMappingCommand(command: FSCommand): Future[QueueOfferResult] = queue.offer(command)
 
   /**
     * publish FS command to FS, An enqueue command into `commandQueue` and add command with events promises into `eventMap`
@@ -510,10 +518,6 @@ trait FSConnection extends Logging {
 
 object FSConnection {
 
-  case class FSData(channelId: String,
-                    fSConnection: FSConnection,
-                    fsMessages: List[FSMessage])
-
   private type CommandBuilder = (Promise[CommandReply], CommandToQueue, CommandResponse)
 
   /**
@@ -556,13 +560,20 @@ object FSConnection {
       CommandResponse(command, commandReply.future, execEvent.future, completeEvent.future))
   }
 
-}
+  /**
+    * FSSocket represent fs inbound/outbound socket connection and connection reply
+    *
+    * @param fsConnection type of FSConnection connection
+    * @param channelData  : ChannelData
+    * @tparam FS type of Fs connection, it could be Inbound/Outbound
+    */
+  case class FSSocket[FS <: FSConnection](fsConnection: FS, channelData: ChannelData)
 
-/**
-  * FSSocket represent fs inbound/outbound socket connection and connection reply
-  *
-  * @param fsConnection type of FSConnection connection
-  * @param reply        : CommandReply reply of first from fs
-  * @tparam FS type of Fs connection, it could be Inbound/Outbound
-  */
-case class FSSocket[FS <: FSConnection](fsConnection: FS, reply: CommandReply)
+  case class FSData(fSConnection: FSConnection,
+                    fsMessages: List[FSMessage])
+
+  case class ChannelData(headers: Map[String, String]) {
+    lazy val uuid: Option[String] = headers.get(HeaderNames.uniqueId)
+  }
+
+}

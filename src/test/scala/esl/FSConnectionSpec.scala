@@ -1,10 +1,11 @@
+package esl
+
 
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{BidiFlow, GraphDSL, Keep, RunnableGraph, Sink, Source}
 import akka.stream.{ActorMaterializer, ClosedShape}
 import akka.testkit.TestKit
 import akka.util.ByteString
-import esl.FSConnection
 import esl.FSConnection.FSData
 import esl.domain.CallCommands.PlayFile
 import esl.domain._

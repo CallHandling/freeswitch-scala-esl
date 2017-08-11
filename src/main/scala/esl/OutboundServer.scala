@@ -23,14 +23,12 @@ import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
 import com.typesafe.config.Config
-import esl.FSConnection.FSData
-import esl.domain.FSMessage
+import esl.FSConnection.{FSData, FSSocket}
 import org.apache.logging.log4j.scala.Logging
 
-import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.concurrent.duration.{Duration, FiniteDuration, SECONDS}
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
-import scala.concurrent.duration.SECONDS
 
 object OutboundServer {
   private val address = "freeswitch.outbound.address"

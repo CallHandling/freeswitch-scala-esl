@@ -22,9 +22,7 @@ import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
 import akka.util.ByteString
 import com.typesafe.config.Config
-import esl.FSConnection.FSData
-import esl.domain.FSMessage
-import esl.parser.Parser
+import esl.FSConnection.{FSData, FSSocket}
 
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
