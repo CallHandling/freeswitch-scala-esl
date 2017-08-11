@@ -36,20 +36,13 @@ import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutExcep
 import scala.util.{Failure, Success}
 
 trait FSConnection extends Logging {
-
+  self =>
 
   lazy private[this] val parser = DefaultParser
   implicit protected val system: ActorSystem
   implicit protected val materializer: ActorMaterializer
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
   private[this] var unParsedBuffer = ""
-  private[this] val bgapiMap: mutable.Map[String, Promise[CommandReply]] = mutable.Map.empty
-
-  private[this] var anotherSink: Option[Sink[List[FSMessage], _]] = Option.empty
-
-  def attachSink(sink: Sink[List[FSMessage], _]): Unit =
-    if (anotherSink.isEmpty) anotherSink = Some(sink)
-
   /**
     * This queue maintain the promise of CommandReply for each respective FSCommand
     */
@@ -65,11 +58,11 @@ trait FSConnection extends Logging {
     * It will parsed incoming packet into free switch messages. If there is an unparsed packet from last received packets,
     * will append to the next received packets. So we will get the complete parsed packet.
     */
-  private[this] val upstreamFlow: Flow[ByteString, List[FSMessage], _] = Flow[ByteString].map { data =>
+  private[this] val upstreamFlow: Flow[ByteString, FSData, _] = Flow[ByteString].map { data =>
     logger.debug(s"Received data from FS:\n ${data.utf8String}")
     val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
     unParsedBuffer = buffer
-    messages
+    FSData(self, messages)
   }
 
   /**
@@ -82,26 +75,12 @@ trait FSConnection extends Logging {
   }
 
   /**
-    * The function handler will create complete pipeline for incoming and outgoing data
-    *
-    * @param flow Flow[ByteString, List[FSMessage], _] => Flow[ByteString, T, _]
-    *             It will transform parsed FSMessage into type `T` data
-    * @tparam T type `T` is transformed from FSMessage
-    * @return (Source[FSCommand, NotUsed], BidiFlow[ByteString, T, FSCommand, ByteString, NotUsed])
-    *         return tuple of source and flow
-    */
-  def handler[T](flow: Flow[ByteString,
-    List[FSMessage], _] => Flow[ByteString, T, _]): (Source[FSCommand, NotUsed], BidiFlow[ByteString, T, FSCommand, ByteString, NotUsed]) = {
-    (Source.fromPublisher(source), BidiFlow.fromFlows(flow(upstreamFlow), downstreamFlow))
-  }
-
-  /**
     * handler() function will create pipeline for source and flow
     *
     * @return Source[FSCommand, NotUsed], BidiFlow[ByteString, List[FSMessage], FSCommand, ByteString, NotUsed]
     *         tuple of source and flow
     */
-  def handler(): (Source[FSCommand, NotUsed], BidiFlow[ByteString, List[FSMessage], FSCommand, ByteString, NotUsed]) = {
+  def handler(): (Source[FSCommand, NotUsed], BidiFlow[ByteString, FSData, FSCommand, ByteString, NotUsed]) = {
     (Source.fromPublisher(source), BidiFlow.fromFlows(upstreamFlow, downstreamFlow))
   }
 
@@ -116,32 +95,34 @@ trait FSConnection extends Logging {
     * @tparam FS type of FS connection. it must be type of FSConnection
     * @return Sink[List[T], NotUsed]
     */
-  def init[FS <: FSConnection](fsConnectionPromise: Promise[InfantFSSocket[FS]],
+  def init[FS <: FSConnection](fsConnectionPromise: Promise[FSSocket[FS]],
                                fsConnection: FS,
-                               fun: (Future[InfantFSSocket[FS]]) => Unit,
-                               timeout: FiniteDuration): Sink[List[FSMessage], _] = {
+                               fun: (Future[FSSocket[FS]]) => Sink[FSData, _],
+                               timeout: FiniteDuration): Sink[FSData, _] = {
     var hasConnected = false
     lazy val timeoutFuture = after(duration = timeout, using = system.scheduler) {
       Future.failed(new TimeoutException(s"Socket doesn't receive any response within $timeout."))
     }
     val fsConnectionFuture = Future.firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
-    val connectToFS = (messages: List[FSMessage]) => {
-      messages.collectFirst {
+    val connectToFS = (fsData: FSData) => {
+      fsData.fsMessages.collectFirst {
         case command: CommandReply =>
           if (command.success) {
-            fsConnectionPromise.complete(Success(InfantFSSocket(fsConnection, command)))
+            fsConnectionPromise.complete(Success(FSSocket(fsConnection, ChannelData(command.headers))))
             hasConnected = true
           } else {
             fsConnectionPromise.complete(Failure(new Exception(s"Socket failed to make connection with an error: ${command.errorMessage}")))
           }
       }
-      messages
+      fsData
     }
-    fun(fsConnectionFuture)
-    Flow[List[FSMessage]].map { fsMessages =>
-      if (!hasConnected) connectToFS(fsMessages)
-      else fsMessages.map(handleFSMessage)
-    }.to(anotherSink.getOrElse(Sink.ignore))
+    Flow[FSData].map { fSData =>
+      if (!hasConnected) connectToFS(fSData)
+      else {
+        fSData.fsMessages.foreach(handleFSMessage)
+        fSData
+      }
+    }.to(fun(fsConnectionFuture))
   }
 
   /**
@@ -192,6 +173,15 @@ trait FSConnection extends Logging {
     }
     eventMessage
   }
+
+  /**
+    * This function will push a command to source queue and doesn't have any mapping with this command.
+    * It is used to sending `connect` or `auth` command
+    *
+    * @param command : FSCommand
+    * @return Future[QueueOfferResult]
+    */
+  protected def publishNonMappingCommand(command: FSCommand): Future[QueueOfferResult] = queue.offer(command)
 
   /**
     * publish FS command to FS, An enqueue command into `commandQueue` and add command with events promises into `eventMap`
@@ -567,6 +557,22 @@ object FSConnection {
     (commandReply,
       CommandToQueue(command, execEvent, completeEvent),
       CommandResponse(command, commandReply.future, execEvent.future, completeEvent.future))
+  }
+
+  /**
+    * FSSocket represent fs inbound/outbound socket connection and connection reply
+    *
+    * @param fsConnection type of FSConnection connection
+    * @param channelData  : ChannelData
+    * @tparam FS type of Fs connection, it could be Inbound/Outbound
+    */
+  case class FSSocket[FS <: FSConnection](fsConnection: FS, channelData: ChannelData)
+
+  case class FSData(fSConnection: FSConnection,
+                    fsMessages: List[FSMessage])
+
+  case class ChannelData(headers: Map[String, String]) {
+    lazy val uuid: Option[String] = headers.get(HeaderNames.uniqueId)
   }
 
 }

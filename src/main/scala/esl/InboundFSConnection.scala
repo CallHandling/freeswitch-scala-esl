@@ -17,7 +17,7 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
+import akka.stream.{ActorMaterializer, QueueOfferResult}
 import esl.FSConnection.CommandResponse
 import esl.domain.ApplicationCommandConfig
 import esl.domain.CallCommands.AuthCommand
@@ -35,7 +35,7 @@ case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMateria
     * @param password : String
     * @return Future[CommandResponse]
     */
-  def connect(password: String): Future[CommandResponse] = sendCommand(AuthCommand(password))
+  private[esl] def connect(password: String): Future[QueueOfferResult] = publishNonMappingCommand(AuthCommand(password))
 
   override def play(fileName: String, config: ApplicationCommandConfig): Future[CommandResponse] = super.play(fileName, config)
 }

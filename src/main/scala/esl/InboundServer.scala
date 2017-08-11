@@ -22,8 +22,7 @@ import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
 import akka.util.ByteString
 import com.typesafe.config.Config
-import esl.domain.FSMessage
-import esl.parser.Parser
+import esl.FSConnection.{FSData, FSSocket}
 
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
@@ -97,10 +96,10 @@ class InboundServer(interface: String, port: Int, timeout: FiniteDuration)
     * @param fun      function will get freeswitch outbound connection after injecting sink
     * @return Future[(Any, Any)]
     */
-  def connect(password: String)(fun: Future[InfantFSSocket[InboundFSConnection]] => Unit): Future[(Any, Any)] = {
+  def connect(password: String)(fun: Future[FSSocket[InboundFSConnection]] => Sink[FSData, _]): Future[(Any, Any)] = {
     val fsConnection = InboundFSConnection()
     fsConnection.connect(password).map { _ =>
-      val sink = fsConnection.init(Promise[InfantFSSocket[InboundFSConnection]](), fsConnection, fun, timeout)
+      val sink = fsConnection.init(Promise[FSSocket[InboundFSConnection]](), fsConnection, fun, timeout)
       client(sink, fsConnection.handler())
     }
   }

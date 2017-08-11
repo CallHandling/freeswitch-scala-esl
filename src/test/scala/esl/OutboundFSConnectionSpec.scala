@@ -1,6 +1,8 @@
+package esl
+
 import akka.actor.ActorSystem
+import akka.stream.QueueOfferResult
 import akka.testkit.TestKit
-import esl.OutboundFSConnection
 
 class OutboundFSConnectionSpec extends TestKit(ActorSystem("outbound-connection"))
   with EslTestKit {
@@ -9,8 +11,8 @@ class OutboundFSConnectionSpec extends TestKit(ActorSystem("outbound-connection"
     "enqueue connect command" in {
       val outbound = new OutboundFSConnection()
       whenReady(outbound.connect()) {
-        commandResponse =>
-          commandResponse.command.toString shouldBe "connect\n\n"
+        result =>
+          result shouldBe QueueOfferResult.Enqueued
       }
     }
   }

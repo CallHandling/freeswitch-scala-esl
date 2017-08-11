@@ -1,8 +1,8 @@
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
-import esl.{FSConnection, OutboundServer}
-import esl.domain._
+import esl.FSConnection.FSData
+import esl.OutboundServer
 import org.apache.logging.log4j.scala.Logging
 
 import scala.util.{Failure, Success}
@@ -13,41 +13,50 @@ import scala.util.{Failure, Success}
 
 
 object OutboundTest extends App with Logging {
-
+  //You need the normal akka implicits (see akka documentation)
   implicit val system = ActorSystem("esl-system")
   implicit val actorMaterializer = ActorMaterializer()
   implicit val ec = system.dispatcher
-
   OutboundServer("127.0.0.1", 8084).startWith(
-    infantFSSocket => {
-      /** Outbound fsConnection future will get complete when `connect` command get response from freeswitch */
-      infantFSSocket.onComplete {
-        case Success(fsSocket) =>
-          val socket = fsSocket.attachSink(Sink.foreach[(FSConnection, List[FSMessage])](f => logger.info(f)))
-          socket.fsConnection.subscribeMyEvents(socket.commandReply.headers.get(HeaderNames.uniqueId).getOrElse("")).foreach {
+    fsSocket => {
+      /** For each outbound connection from freeswitch you will get a future named here 'fsSocket' this future will complete when we get a response from freeswitch to a connect command that is sent automatically by the library */
+      fsSocket.onComplete {
+        case Success(socket) =>
+          /** every command you send will return a future of the result from freeswitch, we just use foreach to get in to
+            the future success here, you can use the future however you like including adding an onComplete callback*/
+          val uuid = socket.channelData.uuid.getOrElse("")
+          socket.fsConnection.subscribeMyEvents(uuid).foreach {
             _ =>
+              /** commands that execute applications will return a CommandResponse which has 3 futures. See below: */
               socket.fsConnection.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav").foreach {
                 commandResponse =>
 
-                  /** This future will get complete, when FS send command/reply message to the socket */
+                  /** This future will complete when FreeSwitch sends command/reply message to the socket.
+                      It will be Success or Failure based on the response from FreeSwitch*/
                   commandResponse.commandReply.foreach(f => logger.info(s"Got command reply: ${f}"))
 
-                  /** This future will get complete, when FS send CHANNEL_EXECUTE event to the socket */
+                  /** This future will complete when FreeSwitch sends the CHANNEL_EXECUTE event to the socket */
                   commandResponse.executeEvent.foreach(f => logger.info(s"Got ChannelExecute event: ${f}"))
 
-                  /** This future will get complete, when FS send CHANNEL_EXECUTE_COMPLETE  event to the socket */
-                  commandResponse.executeComplete.foreach(f => logger.info(s"ChannelExecuteComplete event: ${f}"))
+                  /** This future will complete when FreeSwitch sends the CHANNEL_EXECUTE_COMPLETE  event to the socket */
+                  commandResponse.executeComplete.foreach(f => logger.info(s"Got ChannelExecuteComplete event: ${f}"))
               }
           }
+        /** The connect command returned ERR from freeswitch or timed out */
         case Failure(ex) => logger.info("failed to make outbound socket connection", ex)
+      }
+      /** You can push in a Sink of FSMessage to create a reactive pipeline for all the events coming down the socket */
+      Sink.foreach[FSData] { fsData =>
+        /**Here you have an access of fs connection along with fs messages*/
+        logger.info(s"Fs Messages: ${fsData.fsMessages}")
       }
     },
     result => result onComplete {
-      case Success(conn) => logger.info(s"Connection has closed successfully ${conn.localAddress}")
-      case Failure(ex) => logger.info(s"Failed to close connection: ${ex}")
+      case Success(conn) => logger.info(s"Connection has closed normally ${conn.localAddress}")
+      case Failure(ex) => logger.info(s"Connection with freeswitch closed with exception: ${ex}")
     }
   ).onComplete {
-    case Success(result) => logger.info(s"Outbound socket started successfully with result ${result}")
-    case Failure(ex) => logger.info(s"Outbound socket failed to start ${ex}")
+    case Success(result) => logger.info(s"TCP Listener started successfully ${result}")
+    case Failure(ex) => logger.info(s"TCP Listener Failed to start ${ex}")
   }
 }
