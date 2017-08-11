@@ -29,7 +29,7 @@ import esl.domain.HangupCauses.HangupCause
 import esl.domain.{ApplicationCommandConfig, FSMessage, _}
 import esl.parser.DefaultParser
 import org.apache.logging.log4j.scala.Logging
-
+import java.util.UUID._
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutException}
@@ -43,7 +43,7 @@ trait FSConnection extends Logging {
   implicit protected val materializer: ActorMaterializer
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
   private[this] var unParsedBuffer = ""
-  private var channelId: Option[String] = Option.empty
+  private var channelId: String = ""
   /**
     * This queue maintain the promise of CommandReply for each respective FSCommand
     */
@@ -63,7 +63,7 @@ trait FSConnection extends Logging {
     logger.debug(s"Received data from FS:\n ${data.utf8String}")
     val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
     unParsedBuffer = buffer
-    FSData(channelId,self,messages)
+    FSData(channelId, self, messages)
   }
 
   /**
@@ -109,7 +109,7 @@ trait FSConnection extends Logging {
       fsData.fsMessages.collectFirst {
         case command: CommandReply =>
           if (command.success) {
-            channelId = command.headers.get(HeaderNames.uniqueId)
+            channelId = command.headers.get(HeaderNames.uniqueId).fold(randomUUID().toString)(identity)
             fsConnectionPromise.complete(Success(FSSocket(fsConnection, command)))
             hasConnected = true
           } else {
@@ -510,7 +510,7 @@ trait FSConnection extends Logging {
 
 object FSConnection {
 
-  case class FSData(channelId: Option[String],
+  case class FSData(channelId: String,
                     fSConnection: FSConnection,
                     fsMessages: List[FSMessage])
 
@@ -563,6 +563,6 @@ object FSConnection {
   *
   * @param fsConnection type of FSConnection connection
   * @param reply        : CommandReply reply of first from fs
-  * @tparam FS
+  * @tparam FS type of Fs connection, it could be Inbound/Outbound
   */
 case class FSSocket[FS <: FSConnection](fsConnection: FS, reply: CommandReply)

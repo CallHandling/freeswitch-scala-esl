@@ -30,22 +30,23 @@ object OutboundTest extends App with Logging {
             _ =>
               socket.fsConnection.play("/usr/share/freeswitch/sounds/en/us/callie/conference/8000/conf-pin.wav").foreach {
                 commandResponse =>
-
+                  Thread.sleep(2000)
+println(commandResponse.commandReply)
                   /** This future will get complete, when FS send command/reply message to the socket */
-                  commandResponse.commandReply.foreach(f => logger.info(s"Got command reply: ${f}"))
+                  commandResponse.commandReply.foreach(f => logger.info(s"Got command reply: "))
 
                   /** This future will get complete, when FS send CHANNEL_EXECUTE event to the socket */
-                  commandResponse.executeEvent.foreach(f => logger.info(s"Got ChannelExecute event: ${f}"))
+                  commandResponse.executeEvent.foreach(f => logger.info(s"Got ChannelExecute event:"))
 
                   /** This future will get complete, when FS send CHANNEL_EXECUTE_COMPLETE  event to the socket */
-                  commandResponse.executeComplete.foreach(f => logger.info(s"ChannelExecuteComplete event: ${f}"))
+                  commandResponse.executeComplete.foreach(f => logger.info(s"Got ChannelExecuteComplete event:"))
               }
           }
         case Failure(ex) => logger.info("failed to make outbound socket connection", ex)
       }
       //Sink.actorRef[FSData](system.actorOf(MyActor.props(fsSocket)), "")
       Sink.foreach[FSData] { fsData =>
-        logger.info(s"Fs Messages: ${fsData.fsMessages}")
+        //logger.info(s"Fs Messages: ${fsData.fsMessages}")
       }
     },
     result => result onComplete {
