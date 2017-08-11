@@ -58,8 +58,9 @@ OutboundServer("127.0.0.1", 8084).startWith(
       case Failure(ex) => logger.info("failed to make outbound socket connection", ex)
     }
     /** You can push in a Sink of FSMessage to create a reactive pipeline for all the events coming down the socket */
-    Sink.foreach[List[FSMessage]] { fsMessages => 
-      logger.info(fsMessages) 
+    Sink.foreach[FSData] { fsData => 
+    //Here you have fs connection access so you can call its helper functions like play
+      logger.info(fsData.fsMessages) 
     }    
   },
   result => result onComplete {
@@ -110,7 +111,10 @@ InboundServer("localhost", 8021).connect("ClueCon") {
         }
       case Failure(ex) => logger.info("failed to make inbound socket connection", ex)
     }
-    Sink.foreach[List[FSMessage]] { fsMessages => logger.info(fsMessages) }
+    Sink.foreach[FSData] { fsData => 
+    //Here you have fs connection access so you can call its helper functions like play
+    logger.info(fsData.fsMessages)
+     }
 }.onComplete {
   case Success(result) => logger.info(s"Inbound socket started successfully ${result}")
   case Failure(ex) => logger.info(s"Inbound socket failed to start with exception ${ex}")

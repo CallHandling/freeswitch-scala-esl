@@ -1,6 +1,7 @@
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
+import esl.FSConnection.FSData
 import esl.InboundServer
 import esl.domain.EventNames.All
 import esl.domain.FSMessage
@@ -34,7 +35,7 @@ object InboundTest extends App with Logging {
           }
         case Failure(ex) => logger.info("failed to make inbound socket connection", ex)
       }
-      Sink.foreach[List[FSMessage]] { fsMessages => logger.info(fsMessages) }
+      Sink.foreach[FSData] { fsData => logger.info(fsData.fsMessages) }
   }.onComplete {
     case Success(result) => logger.info(s"Server started successfully with result ${result}")
     case Failure(ex) => logger.info(s"Server failed with exception ${ex}")

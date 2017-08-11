@@ -23,6 +23,7 @@ import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
 import com.typesafe.config.Config
+import esl.FSConnection.FSData
 import esl.domain.FSMessage
 import org.apache.logging.log4j.scala.Logging
 
@@ -82,7 +83,7 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
     * @param onFsConnectionClosed this function will execute when Fs connection is closed.
     * @return The stream is completed successfully or not
     */
-  def startWith(fun: Future[FSSocket[OutboundFSConnection]] => Sink[List[FSMessage], _],
+  def startWith(fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, _],
                 onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] =
     server(fun, fsConnection => fsConnection.handler(), onFsConnectionClosed)
 
@@ -95,8 +96,8 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
     * @tparam T type of data transform into ByteString
     * @return The stream is completed successfully or not
     */
-  private[this] def server[T](fun: Future[FSSocket[OutboundFSConnection]] => Sink[List[FSMessage], _],
-                              flow: OutboundFSConnection => (Source[T, _], BidiFlow[ByteString, List[FSMessage], T, ByteString, NotUsed]),
+  private[this] def server[T](fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, _],
+                              flow: OutboundFSConnection => (Source[T, _], BidiFlow[ByteString, FSData, T, ByteString, NotUsed]),
                               onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] = {
     Tcp().bind(address, port).runForeach {
       connection =>

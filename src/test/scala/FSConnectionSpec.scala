@@ -5,6 +5,7 @@ import akka.stream.{ActorMaterializer, ClosedShape}
 import akka.testkit.TestKit
 import akka.util.ByteString
 import esl.FSConnection
+import esl.FSConnection.FSData
 import esl.domain.CallCommands.PlayFile
 import esl.domain._
 import esl.parser.TestMessages
@@ -23,11 +24,11 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       override implicit protected val materializer: ActorMaterializer = actorMaterializer
     }
 
-    def runGraph(bidiFlow: BidiFlow[ByteString, List[FSMessage], FSCommand, ByteString, _],
+    def runGraph(bidiFlow: BidiFlow[ByteString, FSData, FSCommand, ByteString, _],
                  downstreamSource: Source[FSCommand, _],
                  upstreamSource: Source[ByteString, _],
                  downstreamSink: Sink[ByteString, Future[ByteString]],
-                 upstreamSink: Sink[List[FSMessage], Future[List[FSMessage]]]): (Future[ByteString], Future[List[FSMessage]]) = {
+                 upstreamSink: Sink[FSData, Future[FSData]]): (Future[ByteString], Future[FSData]) = {
       RunnableGraph.fromGraph(GraphDSL.create(downstreamSink, upstreamSink)(Keep.both) {
         implicit b =>
           (st, sb) =>
@@ -48,10 +49,10 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
     "handle upstream flow and parse incoming data into FS messages" in new FSConnectionFixture {
       val (source, bidiFlow) = connection.handler()
       val upstreamSource = Source.single(ByteString(TestMessages.setVarPrivateCommand))
-      val (downStream, upStream) = runGraph(bidiFlow, source, upstreamSource, Sink.head[ByteString], Sink.head[List[FSMessage]])
+      val (downStream, upStream) = runGraph(bidiFlow, source, upstreamSource, Sink.head[ByteString], Sink.head[FSData])
       whenReady(upStream) {
-        fsMessages =>
-          fsMessages should not be empty
+        fsData =>
+          fsData.fsMessages should not be empty
       }
     }
 
@@ -62,7 +63,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       val source = Source.single(fsCmd)
       val expected = s"sendmsg \nEvent-UUID: ${fsCmd.eventUuid}\ncall-command: execute\nexecute-app-name: playback\ncontent-type: text/plain\ncontent-length: 83\n\n/usr/share/freeswitch/sounds/en/us/callie/voicemail/8000/vm-tutorial_change_pin.wav\n"
       val upstreamSource = Source.single(ByteString(TestMessages.setVarPrivateCommand))
-      val (downStream, upStream) = runGraph(bidiFlow, source, upstreamSource, Sink.head[ByteString], Sink.head[List[FSMessage]])
+      val (downStream, upStream) = runGraph(bidiFlow, source, upstreamSource, Sink.head[ByteString], Sink.head[FSData])
       whenReady(downStream) {
         fsCommand =>
           fsCommand.utf8String shouldBe expected

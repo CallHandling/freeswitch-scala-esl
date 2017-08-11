@@ -1,10 +1,12 @@
-import akka.actor.ActorSystem
+import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Sink
-import esl.OutboundServer
+import esl.FSConnection.FSData
+import esl.{FSSocket, OutboundFSConnection, OutboundServer}
 import esl.domain._
 import org.apache.logging.log4j.scala.Logging
 
+import scala.concurrent.Future
 import scala.util.{Failure, Success}
 
 /**
@@ -41,7 +43,10 @@ object OutboundTest extends App with Logging {
           }
         case Failure(ex) => logger.info("failed to make outbound socket connection", ex)
       }
-      Sink.foreach[List[FSMessage]] { fsMessages => logger.info(fsMessages) }
+      //Sink.actorRef[FSData](system.actorOf(MyActor.props(fsSocket)), "")
+      Sink.foreach[FSData] { fsData =>
+        logger.info(s"Fs Messages: ${fsData.fsMessages}")
+      }
     },
     result => result onComplete {
       case Success(conn) => logger.info(s"Connection has closed successfully ${conn.localAddress}")
@@ -51,4 +56,18 @@ object OutboundTest extends App with Logging {
     case Success(result) => logger.info(s"Outbound socket started successfully with result ${result}")
     case Failure(ex) => logger.info(s"Outbound socket failed to start ${ex}")
   }
+}
+
+class MyActor(socket: Future[FSSocket[OutboundFSConnection]]) extends Actor {
+
+  //Here you can access fs connection
+  override def receive: Receive = {
+    case fsData: FSData =>
+    //fsData.fSConnection
+    //fsData.fsMessages
+  }
+}
+
+object MyActor {
+  def props(socket: Future[FSSocket[OutboundFSConnection]]) = Props(new MyActor(socket))
 }
