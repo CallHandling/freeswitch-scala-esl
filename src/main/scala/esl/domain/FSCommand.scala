@@ -78,7 +78,7 @@ object CallCommands {
   }
 
   final case class Break(config: ApplicationCommandConfig) extends FSExecuteApp {
-    override val application: String = "break"
+    override val application: String = s"break$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -113,7 +113,7 @@ object CallCommands {
     * @param config : ApplicationCommandConfig
     */
   final case class Answer(config: ApplicationCommandConfig) extends FSExecuteApp {
-    override val application: String = "answer"
+    override val application: String = s"answer$MESSAGE_TERMINATOR"
   }
 
   final case class AuthCommand(password: String) extends FSCommand {
@@ -301,7 +301,7 @@ object CallCommands {
     * @param config : ApplicationCommandConfig
     */
   final case class PreAnswer(config: ApplicationCommandConfig) extends FSExecuteApp {
-    override val application: String = "pre_answer"
+    override val application: String = s"pre_answer$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -381,7 +381,7 @@ object CallCommands {
     * @param config : ApplicationCommandConfig
     */
   final case class Park(config: ApplicationCommandConfig) extends FSExecuteApp {
-    override val application: String = "park"
+    override val application: String = s"park$MESSAGE_TERMINATOR"
   }
 
   /**
