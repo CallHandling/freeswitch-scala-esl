@@ -73,7 +73,7 @@ object CallCommands {
     * @param config : ApplicationCommandConfig
     */
   final case class Hangup(cause: Option[HangupCause], config: ApplicationCommandConfig) extends FSExecuteApp {
-    override val application: String = "hangup"
+    override val application: String = cause.fold(s"hangup$MESSAGE_TERMINATOR")(_ => "hangup")
     override val args: String = cause.fold("")(_.name)
   }
 
