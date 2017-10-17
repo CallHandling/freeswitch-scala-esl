@@ -105,7 +105,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       val commandResponse = connection.hangup()
       whenReady(commandResponse) {
         response =>
-          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: hangup\n"
+          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: hangup\n\n\n"
           response.command.toString shouldBe fSCommand
       }
     }
@@ -123,7 +123,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       val commandResponse = connection.break()
       whenReady(commandResponse) {
         response =>
-          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: break\n"
+          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: break\n\n\n"
           response.command.toString shouldBe fSCommand
       }
     }
@@ -132,7 +132,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       val commandResponse = connection.answer()
       whenReady(commandResponse) {
         response =>
-          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: answer\n"
+          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: answer\n\n\n"
           response.command.toString shouldBe fSCommand
       }
     }
@@ -268,7 +268,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       val commandResponse = connection.preAnswer()
       whenReady(commandResponse) {
         response =>
-          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: pre_answer\n"
+          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: pre_answer\n\n\n"
           response.command.toString shouldBe fSCommand
       }
     }
@@ -322,7 +322,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
       val commandResponse = connection.park()
       whenReady(commandResponse) {
         response =>
-          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: park\n"
+          val fSCommand = s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: park\n\n\n"
           response.command.toString shouldBe fSCommand
       }
     }

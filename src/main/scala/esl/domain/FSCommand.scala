@@ -224,6 +224,19 @@ object CallCommands {
   }
 
   /**
+    * Specify events of specific channel UUId to listen for. Note, this is not a filter out but rather a "filter in," that is,
+    * when a filter is applied only the filtered values are received. Multiple filters on a socket connection are allowed.
+    * Usage:
+    * filter <Unique-ID> <uuid>
+    *
+    * @param uuid : Channel uuid to filter in
+    * @param config : ApplicationCommandConfig
+    */
+  final case class FilterUUId(uuid: String, config: ApplicationCommandConfig) extends FSCommand {
+    override def toString: String = s"filter Unique-ID ${uuid}$MESSAGE_TERMINATOR"
+  }
+
+  /**
     * filter delete
     * Specify the events which you want to revoke the filter. filter delete can be used when some filters are applied wrongly or
     * when there is no use of the filter.
@@ -236,6 +249,21 @@ object CallCommands {
   final case class DeleteFilter(events: Map[EventName, String], config: ApplicationCommandConfig) extends FSCommand {
     override def toString: String = s"filter delete ${events.map { case (key, value) => s"$value ${key.name}" }.mkString(" ")}$MESSAGE_TERMINATOR"
   }
+
+  /**
+    * filterUUId delete
+    * Specify channel UUId to revoke the filter. filter delete can be used when some filters are applied wrongly or
+    * when there is no use of the filter.
+    * Usage:
+    * filter delete <Unique-ID> <uuid>
+    *
+    * @param uuid : Channel uuid to filter out
+    * @param config :ApplicationCommandConfig
+    */
+  final case class DeleteUUIdFilter(uuid: String, config: ApplicationCommandConfig) extends FSCommand {
+    override def toString: String = s"filter delete Unique-ID ${uuid}$MESSAGE_TERMINATOR"
+  }
+
 
   /**
     * Allows one channel to bridge itself to the a or b leg of another call. The remaining leg of the original call gets hungup

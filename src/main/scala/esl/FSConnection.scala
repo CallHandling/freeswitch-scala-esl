@@ -285,6 +285,20 @@ trait FSConnection extends Logging {
     publishCommand(Filter(events, config))
 
   /**
+    * filterUUId
+    * Specify events of specific channel UUId to listen for. Note, this is not a filter out but rather a "filter in," that is,
+    * when a filter is applied only the filtered values are received. Multiple filters on a socket connection are allowed.
+    * Usage:
+    * filter <Unique-ID> <uuid>
+    *
+    * @param uuid : Channel uuid to filter in
+    * @param config : ApplicationCommandConfig
+    * @return Future[CommandResponse]
+    */
+  def filterUUId(uuid: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
+    publishCommand(FilterUUId(uuid, config))
+
+  /**
     * filter delete
     * Specify the events which you want to revoke the filter. filter delete can be used when some filters are applied wrongly or
     * when there is no use of the filter.
@@ -298,6 +312,20 @@ trait FSConnection extends Logging {
   def deleteFilter(events: Map[EventName, String],
                    config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
     publishCommand(DeleteFilter(events, config))
+
+  /**
+    * filterUUId delete
+    * Specify channel UUId to revoke the filter. filter delete can be used when some filters are applied wrongly or
+    * when there is no use of the filter.
+    * Usage:
+    * filter delete <Unique-ID> <uuid>
+    *
+    * @param uuid : Channel uuid to filter out
+    * @param config :ApplicationCommandConfig
+    * @return Future[CommandResponse]
+    */
+  def deleteUUIdFilter(uuid: String, config: ApplicationCommandConfig = ApplicationCommandConfig()): Future[CommandResponse] =
+    publishCommand(DeleteUUIdFilter(uuid, config))
 
   /**
     * att_xfer <channel_url>
