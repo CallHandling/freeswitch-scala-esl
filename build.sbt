@@ -28,7 +28,7 @@ lazy val commonSettings = Seq(
   scmInfo := Some(
     ScmInfo(
       url("https://github.com/CallHandling/freeswitch-scala-esl"),
-      "scm:https://github.com/CallHandling/freeswitch-scala-esl.git"
+      "git@github.com:CallHandling/freeswitch-scala-esl.git"
     )
   ),
   developers := List(
