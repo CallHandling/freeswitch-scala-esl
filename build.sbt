@@ -40,11 +40,13 @@ lazy val commonSettings = Seq(
   ),
   licenses := Seq("Apache 2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0")),
   homepage := Some(url("https://github.com/CallHandling/freeswitch-scala-esl")),
-  releaseProcess := Seq[ReleaseStep](
+  /*releaseProcess := Seq[ReleaseStep](
     releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value}""""),
     releaseStepCommand("publishSigned"),
     releaseStepCommand("sonatypeRelease")
-  )
+  ),*/
+  releaseUseGlobalVersion := false,
+  releasePublishArtifactsAction := PgpKeys.publishSigned.value
 )
 
 
