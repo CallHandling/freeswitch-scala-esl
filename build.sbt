@@ -2,7 +2,7 @@ lazy val commonSettings = Seq(
   moduleName := "freeswitch-scala-esl",
   organization := "uk.co.callhandling",
   name := "Freeswitch ESL",
-  version := "1.01",
+  version := "1.01.6",
   scalaVersion := "2.12.1",
   resolvers += "Apache Snapshots" at "https://repository.apache.org/content/repositories/snapshots/",
   libraryDependencies ++= Dependencies.scalaTest ++ Dependencies.log4j,
@@ -13,34 +13,35 @@ lazy val commonSettings = Seq(
     else
       Some("releases" at nexus + "service/local/staging/deploy/maven2")
   },
-  credentials += Credentials("Sonatype Nexus Repository Manager",
-    "oss.sonatype.org", "", ""),
+  pgpSecretRing := Path.userHome / ".gnupg/secring.gpg",
+  pgpPublicRing := Path.userHome / ".gnupg/pubring.gpg",
+  credentials += Credentials(Path.userHome / ".m2" / "sonatype-pgp.credentials"),
+  credentials += Credentials(Path.userHome / ".m2" / "sonatype.credentials"),
   publishMavenStyle := true,
   pomIncludeRepository := { (repo: MavenRepository) =>
     repo.root.startsWith("file:")
   },
-  useGpg := true
-  , pomIncludeRepository := { _ => false }
-  , scmInfo := Some(
+  skip in publish := true,
+  useGpg := true,
+  pomIncludeRepository := { _ => false },
+  scmInfo := Some(
     ScmInfo(
       url("https://github.com/CallHandling/freeswitch-scala-esl"),
       "scm:https://github.com/CallHandling/freeswitch-scala-esl.git"
     )
-  )
-  //,gpgCommand := "C:\\Program Files (x86)\\Gpg4win\\bin\\gpa.exe"
-  , developers := List(
+  ),
+  developers := List(
     Developer(
-      id = "0xff.geekbytes",
+      id = "geekbytes.0xff",
       name = "mts.manu",
       email = "0xff@geekbytes.io",
       url = url("http://geekbytes.io")
     )
-  )
-  , licenses := Seq("BSD-style" -> url("http://www.opensource.org/licenses/bsd-license.php"))
-
-  , homepage := Some(url("https://github.com/CallHandling/freeswitch-scala-esl"))
-  , releaseProcess := Seq[ReleaseStep](
-    releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${moduleName.value}""""),
+  ),
+  licenses := Seq("Apache 2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0")),
+  homepage := Some(url("https://github.com/CallHandling/freeswitch-scala-esl")),
+  releaseProcess := Seq[ReleaseStep](
+    releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value}""""),
     releaseStepCommand("publishSigned"),
     releaseStepCommand("sonatypeRelease")
   )
