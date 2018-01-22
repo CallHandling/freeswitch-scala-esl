@@ -19,7 +19,6 @@ lazy val commonSettings = Seq(
   pgpPublicRing := Path.userHome / ".gnupg/pubring.gpg",
   credentials += Credentials(Path.userHome / ".m2" / "sonatype-pgp.credentials"),
   credentials += Credentials(Path.userHome / ".m2" / "sonatype.credentials"),
-  credentials += Credentials(Path.userHome / "github.credentials"),
   publishMavenStyle := true,
   pomIncludeRepository := { (repo: MavenRepository) =>
     repo.root.startsWith("file:")
