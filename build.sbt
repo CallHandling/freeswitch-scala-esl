@@ -53,7 +53,7 @@ lazy val commonSettings = Seq(
   releasePublishArtifactsAction := pgp.PgpKeys.publishSigned.value,
   releaseProcess := {
     releaseProcess.value.flatMap({
-      case `publishArtifacts` => Seq(publishArtifacts, ReleaseStep(releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${name.value} v${(version in ThisBuild).value}""""))/*,ReleaseStep(releaseStepCommand("sonatypeRelease"))*/)
+      case `publishArtifacts` => Seq(ReleaseStep(releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${name.value} v${(version in ThisBuild).value}"""")), publishArtifacts/*,ReleaseStep(releaseStepCommand("sonatypeRelease"))*/)
       case s => Seq(s)
     })
   }
