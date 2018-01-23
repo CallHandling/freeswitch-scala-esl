@@ -45,9 +45,9 @@ lazy val commonSettings = Seq(
   releaseProcess := Seq[ReleaseStep](
     checkSnapshotDependencies,
     inquireVersions,
+    setReleaseVersion,
     runClean,
     runTest,
-    setReleaseVersion,
     commitReleaseVersion,
     tagRelease,
     releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value}""""),
