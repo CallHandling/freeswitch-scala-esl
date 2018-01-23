@@ -1,4 +1,5 @@
 import ReleaseTransformations._
+import com.typesafe.sbt.pgp
 
 lazy val commonSettings = Seq(
   moduleName := "freeswitch-scala-esl",
@@ -49,10 +50,10 @@ lazy val commonSettings = Seq(
     releaseStepCommand("sonatypeRelease")
   ),*/
   releaseUseGlobalVersion := false,
-  releasePublishArtifactsAction := PgpKeys.publishSigned.value,
+  releasePublishArtifactsAction := pgp.PgpKeys.publishSigned.value,
   releaseProcess := {
     releaseProcess.value.flatMap({
-      case `publishArtifacts` => Seq(publishArtifacts, ReleaseStep(releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${name.value} v${(version in ThisBuild).value}"""")),ReleaseStep(releaseStepCommand("sonatypeRelease")))
+      case `publishArtifacts` => Seq(publishArtifacts, ReleaseStep(releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${name.value} v${(version in ThisBuild).value}""""))/*,ReleaseStep(releaseStepCommand("sonatypeRelease"))*/)
       case s => Seq(s)
     })
   }
