@@ -52,7 +52,7 @@ lazy val commonSettings = Seq(
     tagRelease,
     releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value}""""),
     releaseStepCommand("publishSigned"),
-    releaseStepCommand("sonatypeRelease"),
+    //releaseStepCommand("sonatypeRelease"),
     setNextVersion,
     commitNextVersion,
     pushChanges
