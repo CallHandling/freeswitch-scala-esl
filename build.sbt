@@ -1,11 +1,9 @@
 import ReleaseTransformations._
-import com.typesafe.sbt.pgp
 
 lazy val commonSettings = Seq(
   moduleName := "freeswitch-scala-esl",
   organization := "uk.co.callhandling",
   name := "Freeswitch ESL",
-  version := "1.1.8-SNAPSHOT",
   scalaVersion := "2.12.1",
   resolvers += "Apache Snapshots" at "https://repository.apache.org/content/repositories/snapshots/",
   libraryDependencies ++= Dependencies.scalaTest ++ Dependencies.log4j,
@@ -44,19 +42,22 @@ lazy val commonSettings = Seq(
   ),
   licenses := Seq("Apache 2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0")),
   homepage := Some(url("https://github.com/CallHandling/freeswitch-scala-esl")),
-  /*releaseProcess := Seq[ReleaseStep](
+  releaseProcess := Seq[ReleaseStep](
+    checkSnapshotDependencies,
+    inquireVersions,
+    runClean,
+    runTest,
+    setReleaseVersion,
+    commitReleaseVersion,
+    tagRelease,
     releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value}""""),
     releaseStepCommand("publishSigned"),
-    releaseStepCommand("sonatypeRelease")
-  ),*/
-  releaseUseGlobalVersion := false,
-  releasePublishArtifactsAction := pgp.PgpKeys.publishSigned.value,
-  releaseProcess := {
-    releaseProcess.value.flatMap({
-      case `publishArtifacts` => Seq(ReleaseStep(releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${name.value} v${(version in ThisBuild).value}"""")), publishArtifacts/*,ReleaseStep(releaseStepCommand("sonatypeRelease"))*/)
-      case s => Seq(s)
-    })
-  }
+    releaseStepCommand("sonatypeRelease"),
+    setNextVersion,
+    commitNextVersion,
+    pushChanges
+  )
+
 )
 
 
