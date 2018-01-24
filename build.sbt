@@ -1,11 +1,18 @@
+import sbtrelease.ReleaseStateTransformations._
+
 lazy val commonSettings = Seq(
   moduleName := "freeswitch-scala-esl",
   organization := "uk.co.callhandling",
   name := "Freeswitch ESL",
-  version := "1.01.6",
   scalaVersion := "2.12.1",
   resolvers += "Apache Snapshots" at "https://repository.apache.org/content/repositories/snapshots/",
   libraryDependencies ++= Dependencies.scalaTest ++ Dependencies.log4j,
+
+  credentials += Credentials(Path.userHome / "sonatype-pgp.credentials"),
+  credentials += Credentials(Path.userHome / "sonatype.credentials"),
+  useGpg := true,
+  pgpSecretRing := Path.userHome / ".gnupg/secring.gpg",
+  pgpPublicRing := Path.userHome / ".gnupg/pubring.gpg",
   publishTo := {
     val nexus = "https://oss.sonatype.org/"
     if (isSnapshot.value)
@@ -13,17 +20,11 @@ lazy val commonSettings = Seq(
     else
       Some("releases" at nexus + "service/local/staging/deploy/maven2")
   },
-  pgpSecretRing := Path.userHome / ".gnupg/secring.gpg",
-  pgpPublicRing := Path.userHome / ".gnupg/pubring.gpg",
-  credentials += Credentials(Path.userHome / ".m2" / "sonatype-pgp.credentials"),
-  credentials += Credentials(Path.userHome / ".m2" / "sonatype.credentials"),
-  publishMavenStyle := true,
   pomIncludeRepository := { (repo: MavenRepository) =>
     repo.root.startsWith("file:")
   },
-  skip in publish := true,
-  useGpg := true,
-  pomIncludeRepository := { _ => false },
+  publishMavenStyle := true,
+
   scmInfo := Some(
     ScmInfo(
       url("https://github.com/CallHandling/freeswitch-scala-esl"),
@@ -38,12 +39,25 @@ lazy val commonSettings = Seq(
       url = url("http://geekbytes.io")
     )
   ),
+
+  publishArtifact in Test := false,
+  releaseUseGlobalVersion := false,
   licenses := Seq("Apache 2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0")),
   homepage := Some(url("https://github.com/CallHandling/freeswitch-scala-esl")),
   releaseProcess := Seq[ReleaseStep](
-    releaseStepCommand(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value}""""),
-    releaseStepCommand("publishSigned"),
-    releaseStepCommand("sonatypeRelease")
+    checkSnapshotDependencies,              // : ReleaseStep
+    inquireVersions,                        // : ReleaseStep
+    runClean,                               // : ReleaseStep
+    runTest,                                // : ReleaseStep
+    setReleaseVersion,                      // : ReleaseStep
+    commitReleaseVersion,                   // : ReleaseStep, performs the initial git checks
+    tagRelease,                             // : ReleaseStep
+    ReleaseStep(action = Command.process(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value}"""", _)),
+    ReleaseStep(action = Command.process("publishSigned", _)),
+    setNextVersion,                         // : ReleaseStep
+    commitNextVersion,                      // : ReleaseStep
+    pushChanges
+
   )
 )
 
