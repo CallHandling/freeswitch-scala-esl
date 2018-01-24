@@ -8,7 +8,7 @@ lazy val commonSettings = Seq(
   resolvers += "Apache Snapshots" at "https://repository.apache.org/content/repositories/snapshots/",
   libraryDependencies ++= Dependencies.scalaTest ++ Dependencies.log4j,
 
-  credentials += Credentials(Path.userHome / "sonatype-pgp.credentials"),
+  credentials += Credentials(Path.userHome / "pgp.credentials"),
   credentials += Credentials(Path.userHome / "sonatype.credentials"),
   useGpg := true,
   pgpSecretRing := Path.userHome / ".gnupg/secring.gpg",
