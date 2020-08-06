@@ -19,7 +19,7 @@ package esl
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
+import akka.stream.scaladsl.{BidiFlow, Flow, Sink, Source, Tcp}
 import akka.util.ByteString
 import com.typesafe.config.Config
 import esl.FSConnection.{FSData, FSSocket}
@@ -79,13 +79,13 @@ class InboundServer(interface: String, port: Int, timeout: FiniteDuration)
     * @tparam T2 element publish to downstream
     * @return
     */
-  private[this] def client[T1, T2](sink: Sink[T1, _],
-                                   flow: (Source[T2, _], BidiFlow[ByteString, T1, T2, ByteString, NotUsed])) = {
+  private[this] def client[T1, T2, Mat1, Mat2](sink: Sink[T1, Mat1],
+                                   flow: (Source[T2, Mat2], BidiFlow[ByteString, T1, T2, ByteString, NotUsed])) = {
     val clientFlow = Tcp().outgoingConnection(interface, port)
     val (source, protocol) = flow
-    clientFlow
+    val flowWithProtocol: Flow[T2, T1, Future[Tcp.OutgoingConnection]] = clientFlow
       .join(protocol)
-      .runWith(source, sink)
+      flowWithProtocol.runWith(source, sink)
   }
 
 
@@ -96,7 +96,7 @@ class InboundServer(interface: String, port: Int, timeout: FiniteDuration)
     * @param fun      function will get freeswitch outbound connection after injecting sink
     * @return Future[(Any, Any)]
     */
-  def connect(password: String)(fun: Future[FSSocket[InboundFSConnection]] => Sink[FSData, _]): Future[(Any, Any)] = {
+  def connect[Mat](password: String)(fun: Future[FSSocket[InboundFSConnection]] => Sink[FSData, Mat]): Future[(NotUsed, Future[Any])] = {
     val fsConnection = InboundFSConnection()
     fsConnection.connect(password).map { _ =>
       val sink = fsConnection.init(Promise[FSSocket[InboundFSConnection]](), fsConnection, fun, timeout)
