@@ -24,7 +24,6 @@ import akka.util.ByteString
 import akka.{Done, NotUsed}
 import com.typesafe.config.Config
 import esl.FSConnection.{FSData, FSSocket}
-import esl.domain.FSClosed
 import org.apache.logging.log4j.scala.Logging
 
 import scala.concurrent.duration.{Duration, FiniteDuration, SECONDS}
@@ -95,8 +94,8 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
     * @tparam T type of data transform into ByteString
     * @return The stream is completed successfully or not
     */
-  private[this] def server[T, Mat1, Mat2](fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, Mat1],
-                              flow: OutboundFSConnection => (Source[T, Mat2], BidiFlow[ByteString, FSData, T, ByteString, NotUsed]),
+  private[this] def server[T, Mat1](fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, Mat1],
+                              flow: OutboundFSConnection => (Source[T, NotUsed], BidiFlow[ByteString, FSData, T, ByteString, NotUsed]),
                               onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] = {
     Tcp().bind(address, port, halfClose = true).runForeach {
       connection =>

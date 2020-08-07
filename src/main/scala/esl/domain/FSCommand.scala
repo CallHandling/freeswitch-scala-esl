@@ -45,7 +45,6 @@ sealed trait FSExecuteApp extends FSCommand {
   }
 }
 
-case object FSClosed extends FSCommand
 /**
   *
   * @param channelUuid The uuid of the channel to execute the application command on,

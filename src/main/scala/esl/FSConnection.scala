@@ -32,7 +32,12 @@ import org.apache.logging.log4j.scala.Logging
 
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, FiniteDuration}
-import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutException}
+import scala.concurrent.{
+  ExecutionContextExecutor,
+  Future,
+  Promise,
+  TimeoutException
+}
 import scala.util.{Failure, Success}
 
 trait FSConnection extends Logging {
@@ -126,11 +131,13 @@ trait FSConnection extends Logging {
       Future
         .firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
         .map(fsSocket => fun(Future.successful(fsSocket)))
-        .recoverWith {
-          case ex =>
+        .transform(_ match {
+          case failure @ Failure(ex) =>
+            queue.complete()
             logger.error(s"Downstream Canceled because: ${ex.getMessage}")
-            Future.successful(Sink.cancelled[FSData])
-        }
+            failure
+          case success => success
+        })
     )
 
     lazy val connectToFS = (fsData: FSData) => {

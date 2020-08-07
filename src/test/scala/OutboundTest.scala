@@ -66,15 +66,6 @@ object OutboundTest extends App with Logging {
                 logger.info(s"Fs Messages: ${fsData.fsMessages}")
               }
           }
-          .recoverWith {
-            case ex =>
-              println("failed to make outbound socket connection", ex)
-              Future.successful(
-                Sink
-                  .cancelled[FSData]
-                  .mapMaterializedValue(_ => Future.successful(akka.Done))
-              )
-          }
 
         Sink.futureSink(result)
 
