@@ -44,7 +44,8 @@ lazy val commonSettings = Seq(
       url = url("http://learnscala.co")
     )
   ),
-
+  publishConfiguration := publishConfiguration.value.withOverwrite(true),
+  publishLocalConfiguration := publishLocalConfiguration.value.withOverwrite(true),
   publishArtifact in Test := false,
   releaseUseGlobalVersion := false,
   licenses := Seq("Apache 2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0")),
