@@ -81,7 +81,7 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
     * @param onFsConnectionClosed this function will execute when Fs connection is closed.
     * @return The stream is completed successfully or not
     */
-  def startWith(fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, _],
+  def startWith[Mat](fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, Mat],
                 onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] =
     server(fun, fsConnection => fsConnection.handler(), onFsConnectionClosed)
 
@@ -94,19 +94,20 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
     * @tparam T type of data transform into ByteString
     * @return The stream is completed successfully or not
     */
-  private[this] def server[T](fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, _],
-                              flow: OutboundFSConnection => (Source[T, _], BidiFlow[ByteString, FSData, T, ByteString, NotUsed]),
+  private[this] def server[T, Mat1](fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, Mat1],
+                              flow: OutboundFSConnection => (Source[T, NotUsed], BidiFlow[ByteString, FSData, T, ByteString, NotUsed]),
                               onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] = {
-    Tcp().bind(address, port).runForeach {
+    Tcp().bind(address, port, halfClose = true).runForeach {
       connection =>
         logger.info(s"Socket connection is opened for ${connection.remoteAddress}")
         val fsConnection = OutboundFSConnection()
         fsConnection.connect().map { _ =>
-          val sink = fsConnection.init(Promise[FSSocket[OutboundFSConnection]](), fsConnection, fun, timeout)
+          lazy val sink = fsConnection.init(Promise[FSSocket[OutboundFSConnection]](), fsConnection, fun, timeout)
           val (source, protocol) = flow(fsConnection)
           val (_, closed: Future[Any]) = connection.flow
             .join(protocol)
             .runWith(source, sink)
+
           val closedConn = closed.transform {
             case Success(_) =>
               logger.info(s"Socket connection has been closed successfully for ${connection.remoteAddress}")

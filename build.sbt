@@ -4,7 +4,7 @@ lazy val commonSettings = Seq(
   moduleName := "freeswitch-scala-esl",
   organization := "uk.co.callhandling",
   name := "Freeswitch ESL",
-  scalaVersion := "2.12.1",
+  scalaVersion := "2.12.10",
   resolvers += "Apache Snapshots" at "https://repository.apache.org/content/repositories/snapshots/",
   libraryDependencies ++= Dependencies.scalaTest ++ Dependencies.log4j,
 
@@ -37,6 +37,12 @@ lazy val commonSettings = Seq(
       name = "mts.manu",
       email = "0xff@geekbytes.io",
       url = url("http://geekbytes.io")
+    ),
+    Developer(
+      id = "abdheshkumar",
+      name = "Abdhesh Kumar",
+      email = "abdhesh.mca@gmail.com",
+      url = url("http://learnscala.co")
     )
   ),
 
