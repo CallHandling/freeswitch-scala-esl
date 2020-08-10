@@ -10,7 +10,6 @@ lazy val commonSettings = Seq(
 
   credentials += Credentials(Path.userHome / "pgp.credentials"),
   credentials += Credentials(Path.userHome / "sonatype.credentials"),
-  useGpg := true,
   pgpSecretRing := Path.userHome / ".gnupg/secring.gpg",
   pgpPublicRing := Path.userHome / ".gnupg/pubring.gpg",
   publishTo := {
