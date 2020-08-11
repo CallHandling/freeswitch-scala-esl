@@ -134,7 +134,7 @@ trait FSConnection extends Logging {
         .transform(_ match {
           case failure @ Failure(ex) =>
             queue.complete()
-            logger.error(s"Downstream Canceled because: ${ex.getMessage}")
+            logger.debug(s"Downstream Canceled because: ${ex.getMessage}")
             failure
           case success => success
         })
