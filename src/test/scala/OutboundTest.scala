@@ -1,6 +1,6 @@
 import akka.Done
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
+import akka.stream.{ActorMaterializer, NeverMaterializedException}
 import akka.stream.scaladsl.Sink
 import esl.FSConnection.FSData
 import esl.OutboundServer
@@ -73,10 +73,17 @@ object OutboundTest extends App with Logging {
       result =>
         result onComplete {
           case Success(conn) =>
-            logger.info(s"Connection closed normally ${conn.localAddress}")
+            logger.debug(s"Connection closed normally ${conn.localAddress}")
+          case Failure(ex: NeverMaterializedException) =>
+            logger.debug(
+              s"Connection with freeswitch closed with exception: {}",
+              ex
+            )
           case Failure(ex) =>
-            logger
-              .info(s"Connection with freeswitch closed with exception: ${ex}")
+            logger.error(
+              s"Connection with freeswitch closed with exception: {}",
+              ex
+            )
         }
     )
     .onComplete {

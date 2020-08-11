@@ -17,7 +17,7 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
+import akka.stream.{ActorMaterializer, NeverMaterializedException}
 import akka.stream.scaladsl.Tcp.IncomingConnection
 import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
 import akka.util.ByteString
@@ -44,8 +44,10 @@ object OutboundServer {
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(config: Config)
-           (implicit system: ActorSystem, materializer: ActorMaterializer): OutboundServer =
+  def apply(config: Config)(implicit
+      system: ActorSystem,
+      materializer: ActorMaterializer
+  ): OutboundServer =
     new OutboundServer(config)
 
   /**
@@ -57,22 +59,33 @@ object OutboundServer {
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(interface: String, port: Int, timeout: FiniteDuration = defaultTimeout)
-           (implicit system: ActorSystem, materializer: ActorMaterializer): OutboundServer =
+  def apply(
+      interface: String,
+      port: Int,
+      timeout: FiniteDuration = defaultTimeout
+  )(implicit
+      system: ActorSystem,
+      materializer: ActorMaterializer
+  ): OutboundServer =
     new OutboundServer(interface, port, timeout)
 
 }
 
-
-class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
-                    (implicit system: ActorSystem, materializer: ActorMaterializer) extends Logging {
+class OutboundServer(address: String, port: Int, timeout: FiniteDuration)(
+    implicit
+    system: ActorSystem,
+    materializer: ActorMaterializer
+) extends Logging {
   implicit private val ec = system.dispatcher
 
-  def this(config: Config)
-          (implicit system: ActorSystem, materializer: ActorMaterializer) =
-    this(config.getString(OutboundServer.address),
+  def this(
+      config: Config
+  )(implicit system: ActorSystem, materializer: ActorMaterializer) =
+    this(
+      config.getString(OutboundServer.address),
       config.getInt(OutboundServer.port),
-      Duration(config.getDuration(OutboundServer.fsTimeout).getSeconds, SECONDS))
+      Duration(config.getDuration(OutboundServer.fsTimeout).getSeconds, SECONDS)
+    )
 
   /** This function will start a tcp server with given Sink. any free switch messages materialize to given sink.
     * `FsConnection`'s helper function allow you to send/push message to downstream.
@@ -81,8 +94,10 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
     * @param onFsConnectionClosed this function will execute when Fs connection is closed.
     * @return The stream is completed successfully or not
     */
-  def startWith[Mat](fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, Mat],
-                onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] =
+  def startWith[Mat](
+      fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, Mat],
+      onFsConnectionClosed: Future[IncomingConnection] => Unit
+  ): Future[Done] =
     server(fun, fsConnection => fsConnection.handler(), onFsConnectionClosed)
 
   /** This function will start a tcp server for given sink,source and flow.
@@ -94,30 +109,44 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)
     * @tparam T type of data transform into ByteString
     * @return The stream is completed successfully or not
     */
-  private[this] def server[T, Mat1](fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, Mat1],
-                              flow: OutboundFSConnection => (Source[T, NotUsed], BidiFlow[ByteString, FSData, T, ByteString, NotUsed]),
-                              onFsConnectionClosed: Future[IncomingConnection] => Unit): Future[Done] = {
-    Tcp().bind(address, port, halfClose = true).runForeach {
-      connection =>
-        logger.info(s"Socket connection is opened for ${connection.remoteAddress}")
-        val fsConnection = OutboundFSConnection()
-        fsConnection.connect().map { _ =>
-          lazy val sink = fsConnection.init(Promise[FSSocket[OutboundFSConnection]](), fsConnection, fun, timeout)
-          val (source, protocol) = flow(fsConnection)
-          val (_, closed: Future[Any]) = connection.flow
-            .join(protocol)
-            .runWith(source, sink)
+  private[this] def server[T, Mat1](
+      fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, Mat1],
+      flow: OutboundFSConnection => (
+          Source[T, NotUsed],
+          BidiFlow[ByteString, FSData, T, ByteString, NotUsed]
+      ),
+      onFsConnectionClosed: Future[IncomingConnection] => Unit
+  ): Future[Done] = {
+    Tcp().bind(address, port, halfClose = true).runForeach { connection =>
+      logger
+        .info(s"Socket connection is opened for ${connection.remoteAddress}")
+      val fsConnection = OutboundFSConnection()
+      fsConnection.connect().map { _ =>
+        lazy val sink = fsConnection.init(
+          Promise[FSSocket[OutboundFSConnection]](),
+          fsConnection,
+          fun,
+          timeout
+        )
+        val (source, protocol) = flow(fsConnection)
+        val (_, closed: Future[Any]) = connection.flow
+          .join(protocol)
+          .runWith(source, sink)
 
-          val closedConn = closed.transform {
-            case Success(_) =>
-              logger.info(s"Socket connection has been closed successfully for ${connection.remoteAddress}")
-              Success(connection)
-            case Failure(ex) =>
-              logger.info(s"Socket connection failed to closed for ${connection.remoteAddress}")
-              Failure(ex)
-          }
-          onFsConnectionClosed(closedConn)
+        val closedConn = closed.transform {
+          case Success(_) =>
+            logger.debug(
+              s"Socket connection has been closed successfully for ${connection.remoteAddress}"
+            )
+            Success(connection)
+          case Failure(ex) =>
+            logger.debug(
+              s"Socket connection failed to closed for ${connection.remoteAddress}"
+            )
+            Failure(ex)
         }
+        onFsConnectionClosed(closedConn)
+      }
     }
   }
 }
