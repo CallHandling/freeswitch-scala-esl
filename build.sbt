@@ -52,7 +52,7 @@ lazy val commonSettings = Seq(
     setReleaseVersion,                      // : ReleaseStep
     commitReleaseVersion,                   // : ReleaseStep, performs the initial git checks
     tagRelease,                             // : ReleaseStep
-    ReleaseStep(action = Command.process(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value};"""", _)),
+    //ReleaseStep(action = Command.process(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value};"""", _)),
     ReleaseStep(action = Command.process("publishSigned", _)),
     ReleaseStep(action = Command.process("sonatypeBundleRelease", _)),
     setNextVersion,                         // : ReleaseStep
