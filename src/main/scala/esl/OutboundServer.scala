@@ -96,7 +96,7 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)(
     */
   def startWith[Mat](
       fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, Mat],
-      onFsConnectionClosed: Future[IncomingConnection] => Unit
+      onFsConnectionClosed: Future[IncomingConnection] => Unit = _ => ()
   ): Future[Done] =
     server(fun, fsConnection => fsConnection.handler(), onFsConnectionClosed)
 
@@ -139,6 +139,11 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)(
               s"Socket connection has been closed successfully for ${connection.remoteAddress}"
             )
             Success(connection)
+          case Failure(ex: NeverMaterializedException) =>
+            logger.info(
+              s"Connection from ${connection.remoteAddress} cancelled as it was not FreeSwitch"
+            )
+            Failure(ex)
           case Failure(ex) =>
             logger.debug(
               s"Socket connection failed to closed for ${connection.remoteAddress}"
