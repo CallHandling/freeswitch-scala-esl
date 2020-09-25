@@ -59,4 +59,10 @@ class ParserTests extends FlatSpec with Matchers {
     val (messages, _) = DefaultParser.parse(TestMessages.setVarPrivateCommand)
     messages should not be empty
   }
+
+  it must "parse a set hangup event" in {
+    val (messages, _) = DefaultParser.parse(TestMessages.hangUpEvent)
+    println(messages)
+    messages should not be empty
+  }
 }

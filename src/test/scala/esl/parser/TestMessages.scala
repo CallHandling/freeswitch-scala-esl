@@ -527,4 +527,38 @@ object TestMessages {
                 |
                 |playback_terminators=#""".stripMargin.replace("\r","")
 
+  val hangUpEvent ="""Hangup-Cause: NORMAL_CLEARING
+                     |Channel-Read-Codec-Name: PCMU
+                     |Channel-Read-Codec-Rate: 8000
+                     |Channel-Write-Codec-Name: PCMU
+                     |Channel-Write-Codec-Rate: 8000
+                     |Caller-Username: jonas
+                     |Caller-Dialplan: XML
+                     |Caller-Caller-ID-Name: jonas
+                     |Caller-Caller-ID-Number: jonas
+                     |Caller-Network-Addr: 192.168.0.58
+                     |Caller-Destination-Number: 541
+                     |Caller-Unique-ID: 0dd4e4f7-36ed-a04d-a8f7-7aebb683af50
+                     |Caller-Source: mod_sofia
+                     |Caller-Context: default
+                     |Caller-Channel-Name: sofia/192.168.0.58/jonas%40192.168.0.58%3A5060
+                     |Caller-Screen-Bit: yes
+                     |Caller-Privacy-Hide-Name: no
+                     |Caller-Privacy-Hide-Number: no
+                     |Originatee-Username: jonas
+                     |Originatee-Dialplan: XML
+                     |Originatee-Caller-ID-Name: jonas
+                     |Originatee-Caller-ID-Number: jonas
+                     |Originatee-Network-Addr: 192.168.0.58
+                     |Originatee-Destination-Number: 192.168.0.58/arne%25192.168.0.58
+                     |Originatee-Unique-ID: f66e8e31-c9fb-9b41-a9a2-a1586facb97f
+                     |Originatee-Source: mod_sofia
+                     |Originatee-Context: default
+                     |Originatee-Channel-Name: sofia/192.168.0.58/arne
+                     |Originatee-Screen-Bit: yes
+                     |Originatee-Privacy-Hide-Name: no
+                     |Originatee-Privacy-Hide-Number: no
+                     |
+                     |playback_terminators=#""".stripMargin.replace("\r","")
+
 }
