@@ -26,7 +26,7 @@ object Dependencies {
     "com.typesafe.akka" %% "akka-stream-testkit" % akkaStreamV % Test
   )
 
-  lazy val logbackV = Seq(
+  lazy val logback = Seq(
     "com.typesafe.scala-logging" %% "scala-logging" % scalaLoggingV,
     "ch.qos.logback" % "logback-classic" % logbackV
   )
