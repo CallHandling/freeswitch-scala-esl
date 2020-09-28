@@ -20,10 +20,9 @@ import com.typesafe.scalalogging.LazyLogging
 import esl.domain.ContentTypes
 import org.scalatest.{FlatSpec, Matchers}
 
-class ParserTests extends FlatSpec with Matchers with LazyLogging{
+class ParserTests extends FlatSpec with Matchers with LazyLogging {
   behavior of "A Parser"
 
-/*
   it must "generate a valid EventMessage for BackgroundJob" in {
     val (ls, _) = DefaultParser.parse(TestMessages.backgroundJob)
     ls.map(_.contentType) should be(List(ContentTypes.eventPlain))
@@ -39,20 +38,30 @@ class ParserTests extends FlatSpec with Matchers with LazyLogging{
   }
 
   it must "parse multiple messages to a list of correct types" in {
-    val (ls, _) = DefaultParser.parse(TestMessages.callState + TestMessages.disconnectEvent)
+    val (ls, _) =
+      DefaultParser.parse(TestMessages.callState + TestMessages.disconnectEvent)
     ls.map(_.contentLength) should be(List(68, 1751))
     ls.map(_.headers.size) should be(List(4, 52))
-    ls.map(_.contentType) should be(List(ContentTypes.disconnectNotice, ContentTypes.eventPlain))
-    ls.map(_.getClass.getName) should be(List("esl.domain.BasicMessage", "esl.domain.EventMessage"))
+    ls.map(_.contentType) should be(
+      List(ContentTypes.disconnectNotice, ContentTypes.eventPlain)
+    )
+    ls.map(_.getClass.getName) should be(
+      List("esl.domain.BasicMessage", "esl.domain.EventMessage")
+    )
   }
 
   it must "parse a partial messages across multiple calls to parse" in {
-    val txt = TestMessages.backgroundJob + TestMessages.callState + TestMessages.disconnectEvent
+    val txt =
+      TestMessages.backgroundJob + TestMessages.callState + TestMessages.disconnectEvent
     for (i <- 50 to txt.length by 50) {
       val p1 = DefaultParser.parse(txt.substring(0, i))
       val p2 = DefaultParser.parse(p1._2 + txt.substring(i))
       val bm = p1._1 ++ p2._1
-      bm.map(_.contentType) should contain allElementsOf List("text/event-plain", "text/disconnect-notice", "text/event-plain")
+      bm.map(_.contentType) should contain allElementsOf List(
+        "text/event-plain",
+        "text/disconnect-notice",
+        "text/event-plain"
+      )
       bm.map(_.headers.size) should contain allElementsOf List(16, 52, 4)
     }
   }
@@ -61,10 +70,8 @@ class ParserTests extends FlatSpec with Matchers with LazyLogging{
     val (messages, _) = DefaultParser.parse(TestMessages.setVarPrivateCommand)
     messages should not be empty
   }
-*/
 
   it must "parse a set hangup event" in {
-    logger.debug("Hello******************")
     val (messages, _) = DefaultParser.parse(TestMessages.hangUpEvent)
     messages should not be empty
     messages.foreach(_.headers should not be empty)
