@@ -6,7 +6,7 @@ lazy val commonSettings = Seq(
   name := "Freeswitch ESL",
   scalaVersion := "2.12.10",
   resolvers += "Apache Snapshots" at "https://repository.apache.org/content/repositories/snapshots/",
-  libraryDependencies ++= Dependencies.scalaTest ++ Dependencies.log4j,
+  libraryDependencies ++= Dependencies.scalaTest ++ Dependencies.logbackV,
 
   credentials += Credentials(Path.userHome / "pgp.credentials"),
   credentials += Credentials(Path.userHome / "sonatype.credentials"),

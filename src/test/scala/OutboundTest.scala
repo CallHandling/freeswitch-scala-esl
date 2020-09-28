@@ -2,9 +2,9 @@ import akka.Done
 import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, NeverMaterializedException}
 import akka.stream.scaladsl.Sink
+import com.typesafe.scalalogging.LazyLogging
 import esl.FSConnection.FSData
 import esl.OutboundServer
-import org.apache.logging.log4j.scala.Logging
 
 import scala.concurrent.Future
 import scala.util.{Failure, Success}
@@ -13,7 +13,7 @@ import scala.util.{Failure, Success}
   * Created by abdhesh on 28/06/17.
   */
 
-object OutboundTest extends App with Logging {
+object OutboundTest extends App with LazyLogging {
   //You need the normal akka implicits (see akka documentation)
   implicit val system = ActorSystem("esl-system")
   implicit val actorMaterializer = ActorMaterializer()

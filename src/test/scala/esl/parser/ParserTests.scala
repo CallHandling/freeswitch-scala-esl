@@ -16,12 +16,14 @@
 
 package esl.parser
 
+import com.typesafe.scalalogging.LazyLogging
 import esl.domain.ContentTypes
 import org.scalatest.{FlatSpec, Matchers}
 
-class ParserTests extends FlatSpec with Matchers {
+class ParserTests extends FlatSpec with Matchers with LazyLogging{
   behavior of "A Parser"
 
+/*
   it must "generate a valid EventMessage for BackgroundJob" in {
     val (ls, _) = DefaultParser.parse(TestMessages.backgroundJob)
     ls.map(_.contentType) should be(List(ContentTypes.eventPlain))
@@ -59,10 +61,12 @@ class ParserTests extends FlatSpec with Matchers {
     val (messages, _) = DefaultParser.parse(TestMessages.setVarPrivateCommand)
     messages should not be empty
   }
+*/
 
   it must "parse a set hangup event" in {
+    logger.debug("Hello******************")
     val (messages, _) = DefaultParser.parse(TestMessages.hangUpEvent)
-    println(messages)
     messages should not be empty
+    messages.foreach(_.headers should not be empty)
   }
 }

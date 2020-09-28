@@ -23,8 +23,8 @@ import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
 import com.typesafe.config.Config
+import com.typesafe.scalalogging.LazyLogging
 import esl.FSConnection.{FSData, FSSocket}
-import org.apache.logging.log4j.scala.Logging
 
 import scala.concurrent.duration.{Duration, FiniteDuration, SECONDS}
 import scala.concurrent.{Future, Promise}
@@ -75,7 +75,7 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)(
     implicit
     system: ActorSystem,
     materializer: ActorMaterializer
-) extends Logging {
+) extends LazyLogging {
   implicit private val ec = system.dispatcher
 
   def this(

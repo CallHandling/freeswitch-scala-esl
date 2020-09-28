@@ -22,25 +22,20 @@ import akka.pattern.after
 import akka.stream._
 import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
 import akka.util.ByteString
+import com.typesafe.scalalogging.LazyLogging
 import esl.FSConnection._
 import esl.domain.CallCommands._
 import esl.domain.EventNames.EventName
 import esl.domain.HangupCauses.HangupCause
 import esl.domain.{ApplicationCommandConfig, FSMessage, _}
 import esl.parser.{DefaultParser, Parser}
-import org.apache.logging.log4j.scala.Logging
 
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, FiniteDuration}
-import scala.concurrent.{
-  ExecutionContextExecutor,
-  Future,
-  Promise,
-  TimeoutException
-}
+import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutException}
 import scala.util.{Failure, Success}
 
-trait FSConnection extends Logging {
+trait FSConnection extends LazyLogging {
   self =>
 
   lazy private[this] val parser: Parser = DefaultParser
