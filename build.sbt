@@ -7,10 +7,11 @@ lazy val commonSettings = Seq(
   scalaVersion := "2.12.10",
   resolvers += "Apache Snapshots" at "https://repository.apache.org/content/repositories/snapshots/",
   libraryDependencies ++= Dependencies.scalaTest ++ Dependencies.logback,
+
+  credentials += Credentials(Path.userHome / "pgp.credentials"),
   credentials += Credentials(Path.userHome / "sonatype.credentials"),
-  //credentials += Credentials(Path.userHome / "pgp.credentials"),
-  //pgpSecretRing := Path.userHome / ".gnupg/secring.gpg",
-  //pgpPublicRing := Path.userHome / ".gnupg/pubring.gpg",
+  pgpSecretRing := Path.userHome / ".gnupg/secring.gpg",
+  pgpPublicRing := Path.userHome / ".gnupg/pubring.gpg",
   publishTo := sonatypePublishToBundle.value,
   pomIncludeRepository := { (repo: MavenRepository) =>
     repo.root.startsWith("file:")
@@ -35,6 +36,12 @@ lazy val commonSettings = Seq(
       name = "Abdhesh Kumar",
       email = "abdhesh.mca@gmail.com",
       url = url("http://learnscala.co")
+    ),
+    Developer(
+      id = "nathanleyton",
+      name = "Nathan Leyton",
+      email = "nathan@hubbub.ai",
+      url = url("https://callhandling.co.uk")
     )
   ),
   publishConfiguration := publishConfiguration.value.withOverwrite(true),
@@ -51,8 +58,8 @@ lazy val commonSettings = Seq(
     setReleaseVersion,                      // : ReleaseStep
     commitReleaseVersion,                   // : ReleaseStep, performs the initial git checks
     tagRelease,                             // : ReleaseStep
-    //ReleaseStep(action = Command.process(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value}"""", _)),
-    //ReleaseStep(action = Command.process("publishSigned", _)),
+    //ReleaseStep(action = Command.process(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value};"""", _)),
+    ReleaseStep(action = Command.process("publishSigned", _)),
     ReleaseStep(action = Command.process("sonatypeBundleRelease", _)),
     setNextVersion,                         // : ReleaseStep
     commitNextVersion,                      // : ReleaseStep
