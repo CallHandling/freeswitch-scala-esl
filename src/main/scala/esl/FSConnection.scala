@@ -140,9 +140,8 @@ trait FSConnection extends LazyLogging {
         case ::(command: CommandReply, _) =>
           if (command.success) {
             if(lingering && !isLingering) {
-              publishNonMappingCommand(LingerCommand).map { _ =>
-                isLingering = true
-              }
+              isLingering = true
+              publishNonMappingCommand(LingerCommand)
             } else {
               fsConnectionPromise.complete(
                 Success(FSSocket(fsConnection, ChannelData(command.headers)))
