@@ -7,7 +7,6 @@ lazy val commonSettings = Seq(
   scalaVersion := "2.12.10",
   resolvers += "Apache Snapshots" at "https://repository.apache.org/content/repositories/snapshots/",
   libraryDependencies ++= Dependencies.scalaTest ++ Dependencies.logback,
-
   credentials += Credentials(Path.userHome / "pgp.credentials"),
   credentials += Credentials(Path.userHome / "sonatype.credentials"),
   pgpSecretRing := Path.userHome / ".gnupg/secring.gpg",
