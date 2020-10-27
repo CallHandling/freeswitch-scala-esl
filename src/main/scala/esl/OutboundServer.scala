@@ -126,14 +126,12 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration, linger
         .info(s"Socket connection is opened for ${connection.remoteAddress}")
       val fsConnection = OutboundFSConnection()
       fsConnection.connect().map { _ =>
-        if(linger){
-          fsConnection.linger()
-        }
         lazy val sink = fsConnection.init(
           Promise[FSSocket[OutboundFSConnection]](),
           fsConnection,
           fun,
-          timeout
+          timeout,
+          linger
         )
         val (source, protocol) = flow(fsConnection)
         val (_, closed: Future[Any]) = connection.flow

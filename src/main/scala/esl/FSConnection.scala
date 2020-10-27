@@ -110,9 +110,11 @@ trait FSConnection extends LazyLogging {
       fsConnectionPromise: Promise[FSSocket[FS]],
       fsConnection: FS,
       fun: Future[FSSocket[FS]] => Sink[FSData, Mat],
-      timeout: FiniteDuration
+      timeout: FiniteDuration,
+      lingering: Boolean
   ) = {
     var hasConnected = false
+    var isLingering = false
     lazy val timeoutFuture =
       after(duration = timeout, using = system.scheduler) {
         Future.failed(
@@ -133,15 +135,20 @@ trait FSConnection extends LazyLogging {
           case success => success
         })
     )
-
     lazy val connectToFS = (fsData: FSData) => {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
           if (command.success) {
-            fsConnectionPromise.complete(
-              Success(FSSocket(fsConnection, ChannelData(command.headers)))
-            )
-            hasConnected = true
+            if(lingering && !isLingering) {
+              publishNonMappingCommand(LingerCommand).map { _ =>
+                isLingering = true
+              }
+            } else {
+              fsConnectionPromise.complete(
+                Success(FSSocket(fsConnection, ChannelData(command.headers)))
+              )
+              hasConnected = true
+            }
           } else {
             fsConnectionPromise.complete(
               Failure(

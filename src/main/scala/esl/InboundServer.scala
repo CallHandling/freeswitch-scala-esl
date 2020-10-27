@@ -31,6 +31,7 @@ object InboundServer {
   private val address = "freeswitch.inbound.address"
   private val port = "freeswitch.inbound.port"
   private val fsTimeout = "freeswitch.inbound.startup.timeout"
+  private val linger = "freeswitch.outbound.linger"
   private val defaultTimeout = Duration(1, SECONDS)
 
   /**
@@ -54,13 +55,13 @@ object InboundServer {
     * @param materializer : ActorMaterializer
     * @return OutboundServer
     */
-  def apply(interface: String, port: Int, timeout: FiniteDuration = defaultTimeout)
+  def apply(interface: String, port: Int, timeout: FiniteDuration = defaultTimeout,linger: Boolean = true)
            (implicit system: ActorSystem, materializer: ActorMaterializer): InboundServer =
-    new InboundServer(interface, port, timeout)
+    new InboundServer(interface, port, timeout, linger)
 
 }
 
-class InboundServer(interface: String, port: Int, timeout: FiniteDuration)
+class InboundServer(interface: String, port: Int, timeout: FiniteDuration, linger:Boolean)
                    (implicit system: ActorSystem, materializer: ActorMaterializer) {
   implicit private val ec = system.dispatcher
 
@@ -68,7 +69,8 @@ class InboundServer(interface: String, port: Int, timeout: FiniteDuration)
           (implicit system: ActorSystem, materializer: ActorMaterializer) =
     this(config.getString(InboundServer.address),
       config.getInt(InboundServer.port),
-      Duration(config.getDuration(InboundServer.fsTimeout).getSeconds, SECONDS))
+      Duration(config.getDuration(InboundServer.fsTimeout).getSeconds, SECONDS),
+      config.getBoolean(InboundServer.linger))
 
   /**
     * Open a client connection for given interface and port
@@ -99,7 +101,7 @@ class InboundServer(interface: String, port: Int, timeout: FiniteDuration)
   def connect[Mat](password: String)(fun: Future[FSSocket[InboundFSConnection]] => Sink[FSData, Mat]): Future[(NotUsed, Future[Any])] = {
     val fsConnection = InboundFSConnection()
     fsConnection.connect(password).map { _ =>
-      val sink = fsConnection.init(Promise[FSSocket[InboundFSConnection]](), fsConnection, fun, timeout)
+      val sink = fsConnection.init(Promise[FSSocket[InboundFSConnection]](), fsConnection, fun, timeout, linger)
       client(sink, fsConnection.handler())
     }
   }
