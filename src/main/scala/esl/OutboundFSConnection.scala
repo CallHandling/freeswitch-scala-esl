@@ -34,7 +34,7 @@ case class OutboundFSConnection()(implicit actorSystem: ActorSystem, actorMateri
     */
   private[esl] def connect(): Future[QueueOfferResult] = publishNonMappingCommand(ConnectCommand)
 
-
+  private[esl] def linger(): Future[QueueOfferResult] = publishNonMappingCommand(LingerCommand)
 }
 
 

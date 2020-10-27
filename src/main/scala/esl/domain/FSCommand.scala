@@ -173,6 +173,10 @@ object CallCommands {
     override def toString: String = s"connect$MESSAGE_TERMINATOR"
   }
 
+  final case object LingerCommand extends FSCommand {
+    override def toString: String = s"linger$MESSAGE_TERMINATOR"
+  }
+
   /**
     * Freeswitch command as raw command that present as string
     *

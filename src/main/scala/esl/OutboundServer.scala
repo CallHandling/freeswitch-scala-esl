@@ -25,6 +25,7 @@ import akka.{Done, NotUsed}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import esl.FSConnection.{FSData, FSSocket}
+import esl.domain.CallCommands.LingerCommand
 
 import scala.concurrent.duration.{Duration, FiniteDuration, SECONDS}
 import scala.concurrent.{Future, Promise}
@@ -34,6 +35,7 @@ object OutboundServer {
   private val address = "freeswitch.outbound.address"
   private val port = "freeswitch.outbound.port"
   private val fsTimeout = "freeswitch.outbound.startup.timeout"
+  private val linger = "freeswitch.outbound.linger"
   private val defaultTimeout = Duration(1, SECONDS)
 
   /**
@@ -62,16 +64,17 @@ object OutboundServer {
   def apply(
       interface: String,
       port: Int,
-      timeout: FiniteDuration = defaultTimeout
+      timeout: FiniteDuration = defaultTimeout,
+      linger: Boolean = true
   )(implicit
       system: ActorSystem,
       materializer: ActorMaterializer
   ): OutboundServer =
-    new OutboundServer(interface, port, timeout)
+    new OutboundServer(interface, port, timeout, linger)
 
 }
 
-class OutboundServer(address: String, port: Int, timeout: FiniteDuration)(
+class OutboundServer(address: String, port: Int, timeout: FiniteDuration, linger: Boolean)(
     implicit
     system: ActorSystem,
     materializer: ActorMaterializer
@@ -84,7 +87,8 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)(
     this(
       config.getString(OutboundServer.address),
       config.getInt(OutboundServer.port),
-      Duration(config.getDuration(OutboundServer.fsTimeout).getSeconds, SECONDS)
+      Duration(config.getDuration(OutboundServer.fsTimeout).getSeconds, SECONDS),
+      config.getBoolean(OutboundServer.linger)
     )
 
   /** This function will start a tcp server with given Sink. any free switch messages materialize to given sink.
@@ -122,6 +126,9 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration)(
         .info(s"Socket connection is opened for ${connection.remoteAddress}")
       val fsConnection = OutboundFSConnection()
       fsConnection.connect().map { _ =>
+        if(linger){
+          fsConnection.linger()
+        }
         lazy val sink = fsConnection.init(
           Promise[FSSocket[OutboundFSConnection]](),
           fsConnection,
