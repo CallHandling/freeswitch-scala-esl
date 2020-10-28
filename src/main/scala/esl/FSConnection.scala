@@ -44,7 +44,7 @@ trait FSConnection extends LazyLogging {
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
   private[this] var unParsedBuffer = ""
 
-  val connectionId: String = UUID.randomUUID().toString
+  var connectionId: String = UUID.randomUUID().toString
   /**
     * This queue maintain the promise of CommandReply for each respective FSCommand
     */
@@ -68,7 +68,9 @@ trait FSConnection extends LazyLogging {
       logger.debug(s"Received data from FS for connection $connectionId :\n ${data.utf8String}")
       val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
       unParsedBuffer = buffer
+      logger.debug(s"Parsed messages for FS for connection $connectionId :\n ${messages.mkString("\n")}")
       logger.debug(s"Unparsed buffer for FS for connection $connectionId :\n $unParsedBuffer")
+
       FSData(self, messages)
     }
 
@@ -144,6 +146,8 @@ trait FSConnection extends LazyLogging {
             fsConnectionPromise.complete(
               Success(FSSocket(fsConnection, ChannelData(command.headers)))
             )
+            logger.debug(s"Completing connect for $connectionId")
+            connectionId = command.headers(HeaderNames.uniqueId)
             hasConnected = true
             if (lingering) publishNonMappingCommand(LingerCommand)
             fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command))
@@ -165,6 +169,7 @@ trait FSConnection extends LazyLogging {
         case ::(command: CommandReply, _) =>
           if (command.success && command.replyText.getOrElse("") == "+OK will linger") {
             isLingering = true
+            logger.debug(s"Completing linger for $connectionId")
             fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command))
           } else {
             fsConnectionPromise.complete(
@@ -191,6 +196,7 @@ trait FSConnection extends LazyLogging {
           else if (containsCmdReply(fSData) && lingering && !isLingering && hasConnected) doLinger(fSData)
           else fSData
           //Send every message
+          logger.debug(s"DSData flow for $connectionId:\n${fSData.fsMessages.mkString}")
           updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f)))
       }
       .toMat(futureSink)(Keep.right)
@@ -245,6 +251,7 @@ trait FSConnection extends LazyLogging {
     * @return EventMessage
     */
   private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
+    logger.debug(s"handleFSEventMessage $connectionId:\n${eventMessage.toString}")
     eventMessage.applicationUuid.flatMap(eventMap.lift).foreach {
       commandToQueue =>
         if (eventMessage.eventName.contains(EventNames.ChannelExecute))
