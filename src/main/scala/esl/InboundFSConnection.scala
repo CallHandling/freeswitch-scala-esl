@@ -17,16 +17,16 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.stream.{ActorMaterializer, QueueOfferResult}
+import akka.stream.{ Materializer, QueueOfferResult}
 import esl.FSConnection.CommandResponse
 import esl.domain.ApplicationCommandConfig
 import esl.domain.CallCommands.AuthCommand
 
 import scala.concurrent.Future
 
-case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMaterializer: ActorMaterializer)
+case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMaterializer: Materializer)
   extends FSConnection {
-  override implicit val materializer: ActorMaterializer = actorMaterializer
+  override implicit val materializer: Materializer = actorMaterializer
   override implicit val system: ActorSystem = actorSystem
 
   /**

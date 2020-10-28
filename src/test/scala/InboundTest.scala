@@ -1,5 +1,5 @@
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
+import akka.stream.Materializer
 import akka.stream.scaladsl.Sink
 import com.typesafe.scalalogging.LazyLogging
 import esl.FSConnection.FSData
@@ -11,7 +11,7 @@ import scala.util.{Failure, Success}
 
 object InboundTest extends App with LazyLogging {
   implicit val system = ActorSystem()
-  implicit val mater = ActorMaterializer()
+  implicit val mater = Materializer(system)
   implicit val ec = system.dispatcher
 
   InboundServer("localhost", 8021)

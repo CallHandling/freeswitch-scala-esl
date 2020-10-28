@@ -3,7 +3,7 @@ package esl
 
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{BidiFlow, GraphDSL, Keep, RunnableGraph, Sink, Source}
-import akka.stream.{ActorMaterializer, ClosedShape}
+import akka.stream.{Materializer, ClosedShape}
 import akka.testkit.TestKit
 import akka.util.ByteString
 import esl.FSConnection.FSData
@@ -14,7 +14,7 @@ import esl.parser.TestMessages
 import scala.concurrent.duration.{Duration, _}
 import scala.concurrent.{ExecutionContext, Future}
 
-class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
+class FSConnectionSpec extends TestKit(ActorSystem("esl-test"))
   with EslTestKit {
   implicit val _system: ActorSystem = system
 
@@ -22,7 +22,7 @@ class FSConnectionSpec extends TestKit(ActorSystem("fs-connection"))
     implicit val ec: ExecutionContext = system.dispatcher
     val connection = new FSConnection {
       override implicit protected val system: ActorSystem = _system
-      override implicit protected val materializer: ActorMaterializer = actorMaterializer
+      override implicit protected val materializer: Materializer = actorMaterializer
     }
 
     def runGraph(bidiFlow: BidiFlow[ByteString, FSData, FSCommand, ByteString, _],

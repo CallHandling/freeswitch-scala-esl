@@ -17,7 +17,7 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.stream.{ActorMaterializer, NeverMaterializedException}
+import akka.stream.{Materializer, NeverMaterializedException}
 import akka.stream.scaladsl.Tcp.IncomingConnection
 import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
 import akka.util.ByteString
@@ -25,7 +25,6 @@ import akka.{Done, NotUsed}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import esl.FSConnection.{FSData, FSSocket}
-import esl.domain.CallCommands.LingerCommand
 
 import scala.concurrent.duration.{Duration, FiniteDuration, SECONDS}
 import scala.concurrent.{Future, Promise}
@@ -43,12 +42,12 @@ object OutboundServer {
     *
     * @param config       : Config this configuration must have `freeswitch.outbound.address` and `freeswitch.outbound.address`
     * @param system       : ActorSystem
-    * @param materializer : ActorMaterializer
+    * @param materializer : Materializer
     * @return OutboundServer
     */
   def apply(config: Config)(implicit
       system: ActorSystem,
-      materializer: ActorMaterializer
+      materializer: Materializer
   ): OutboundServer =
     new OutboundServer(config)
 
@@ -58,7 +57,7 @@ object OutboundServer {
     * @param interface    : String name/ip address of the server
     * @param port         : Int port number of the server
     * @param system       : ActorSystem
-    * @param materializer : ActorMaterializer
+    * @param materializer : Materializer
     * @return OutboundServer
     */
   def apply(
@@ -68,7 +67,7 @@ object OutboundServer {
       linger: Boolean = true
   )(implicit
       system: ActorSystem,
-      materializer: ActorMaterializer
+      materializer: Materializer
   ): OutboundServer =
     new OutboundServer(interface, port, timeout, linger)
 
@@ -77,13 +76,13 @@ object OutboundServer {
 class OutboundServer(address: String, port: Int, timeout: FiniteDuration, linger: Boolean)(
     implicit
     system: ActorSystem,
-    materializer: ActorMaterializer
+    materializer: Materializer
 ) extends LazyLogging {
   implicit private val ec = system.dispatcher
 
   def this(
       config: Config
-  )(implicit system: ActorSystem, materializer: ActorMaterializer) =
+  )(implicit system: ActorSystem, materializer: Materializer) =
     this(
       config.getString(OutboundServer.address),
       config.getInt(OutboundServer.port),

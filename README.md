@@ -11,7 +11,7 @@ This will bind to a host / port in your system and wait for connections coming f
 
 ```scala
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
+import akka.stream.Materializer
 import akka.stream.scaladsl.Sink
 import esl.FSConnection.FSData
 import esl.OutboundServer
@@ -27,7 +27,7 @@ import scala.util.{Failure, Success}
 object OutboundTest extends App with Logging {
   //You need the normal akka implicits (see akka documentation)
   implicit val system = ActorSystem("esl-system")
-  implicit val actorMaterializer = ActorMaterializer()
+  implicit val actorMaterializer = Materializer(system)
   implicit val ec = system.dispatcher
   OutboundServer("127.0.0.1", 8084).startWith(
     fsSocket => {

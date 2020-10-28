@@ -1,6 +1,6 @@
 import akka.Done
 import akka.actor.ActorSystem
-import akka.stream.{ActorMaterializer, NeverMaterializedException}
+import akka.stream.{Materializer, NeverMaterializedException}
 import akka.stream.scaladsl.Sink
 import com.typesafe.scalalogging.LazyLogging
 import esl.FSConnection.FSData
@@ -15,8 +15,8 @@ import scala.util.{Failure, Success}
 
 object OutboundTest extends App with LazyLogging {
   //You need the normal akka implicits (see akka documentation)
-  implicit val system = ActorSystem("esl-system")
-  implicit val actorMaterializer = ActorMaterializer()
+  implicit val system = ActorSystem("esl-test")
+  implicit val actorMaterializer = Materializer(system)
   implicit val ec = system.dispatcher
   OutboundServer("127.0.0.1", 8084)
     .startWith(fsSocket => {

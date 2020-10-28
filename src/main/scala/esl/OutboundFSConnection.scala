@@ -17,15 +17,15 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.stream.{ActorMaterializer, QueueOfferResult}
+import akka.stream.{Materializer, QueueOfferResult}
 import esl.domain.CallCommands._
 
 import scala.concurrent.Future
 
-case class OutboundFSConnection()(implicit actorSystem: ActorSystem, actorMaterializer: ActorMaterializer)
+case class OutboundFSConnection()(implicit actorSystem: ActorSystem, actorMaterializer: Materializer)
   extends FSConnection {
   override implicit val system: ActorSystem = actorSystem
-  override implicit val materializer: ActorMaterializer = actorMaterializer
+  override implicit val materializer: Materializer = actorMaterializer
 
   /**
     * Connect with freeswitch by sending `connect` command
@@ -34,10 +34,3 @@ case class OutboundFSConnection()(implicit actorSystem: ActorSystem, actorMateri
     */
   private[esl] def connect(): Future[QueueOfferResult] = publishNonMappingCommand(ConnectCommand)
 }
-
-
-
-
-
-
-

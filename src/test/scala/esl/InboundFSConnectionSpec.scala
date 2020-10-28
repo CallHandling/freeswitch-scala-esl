@@ -4,7 +4,7 @@ import akka.actor.ActorSystem
 import akka.stream.QueueOfferResult
 import akka.testkit.TestKit
 
-class InboundFSConnectionSpec extends TestKit(ActorSystem("outbound-connection"))
+class InboundFSConnectionSpec extends TestKit(ActorSystem("esl-test"))
   with EslTestKit {
 
   "connect function" should {
