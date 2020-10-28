@@ -87,9 +87,9 @@ trait FSConnection extends LazyLogging {
     *         tuple of source and flow
     */
   def handler(): (
-      Source[FSCommand, NotUsed],
+    Source[FSCommand, NotUsed],
       BidiFlow[ByteString, FSData, FSCommand, ByteString, NotUsed]
-  ) = {
+    ) = {
     (
       Source.fromPublisher(source),
       BidiFlow.fromFlows(upstreamFlow, downstreamFlow)
@@ -108,12 +108,12 @@ trait FSConnection extends LazyLogging {
     * @return Sink[List[T], NotUsed]
     */
   def init[FS <: FSConnection, Mat](
-      fsConnectionPromise: Promise[FSSocket[FS]],
-      fsConnection: FS,
-      fun: Future[FSSocket[FS]] => Sink[FSData, Mat],
-      timeout: FiniteDuration,
-      lingering: Boolean
-  ) = {
+                                     fsConnectionPromise: Promise[FSSocket[FS]],
+                                     fsConnection: FS,
+                                     fun: Future[FSSocket[FS]] => Sink[FSData, Mat],
+                                     timeout: FiniteDuration,
+                                     lingering: Boolean
+                                   ) = {
     var hasConnected = false
     var isLingering = false
     lazy val timeoutFuture =
@@ -130,7 +130,7 @@ trait FSConnection extends LazyLogging {
         .firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
         .map(fsSocket => fun(Future.successful(fsSocket)))
         .transform(_ match {
-          case failure @ Failure(ex) =>
+          case failure@Failure(ex) =>
             queue.complete()
             failure
           case success => success
@@ -144,8 +144,8 @@ trait FSConnection extends LazyLogging {
               Success(FSSocket(fsConnection, ChannelData(command.headers)))
             )
             hasConnected = true
-            if(lingering) publishNonMappingCommand(LingerCommand)
-            fsData.fsMessages.dropWhile(_ == command)
+            if (lingering) publishNonMappingCommand(LingerCommand)
+            fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command))
           } else {
             fsConnectionPromise.complete(
               Failure(
@@ -164,7 +164,7 @@ trait FSConnection extends LazyLogging {
         case ::(command: CommandReply, _) =>
           if (command.success && command.replyText.getOrElse("") == "+OK will linger") {
             isLingering = true
-            fsData.fsMessages.dropWhile(_ == command)
+            fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command))
           } else {
             fsConnectionPromise.complete(
               Failure(
@@ -178,16 +178,19 @@ trait FSConnection extends LazyLogging {
         case _ => fsData
       }
     }
+
+    val containsCmdReply = (fSData: FSData) => {
+      fSData.fsMessages.count(a => a.contentType == ContentTypes.commandReply) > 0
+    }
+
     Flow[FSData]
       .map {
-        def containsCmdReply(fSData: FSData) = {
-          fSData.fsMessages.count(a => a.contentType == ContentTypes.commandReply) > 0
-        }
         fSData =>
-        if (containsCmdReply(fSData) && !hasConnected) connectToFS(fSData)
-        if (containsCmdReply(fSData) && lingering && !isLingering && hasConnected) doLinger(fSData)
-        fSData.fsMessages.foreach(handleFSMessage)
-        fSData
+          val updatedFSData = if (containsCmdReply(fSData) && !hasConnected) connectToFS(fSData)
+          else if (containsCmdReply(fSData) && lingering && !isLingering && hasConnected) doLinger(fSData)
+          else fSData
+          //Send every message
+          updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f)))
       }
       .toMat(futureSink)(Keep.right)
   }
@@ -215,8 +218,8 @@ trait FSConnection extends LazyLogging {
     * @return CommandReply
     */
   private def handleCommandReplyMessage(
-      cmdReply: CommandReply
-  ): CommandReply = {
+                                         cmdReply: CommandReply
+                                       ): CommandReply = {
     if (commandQueue.nonEmpty) {
       val promise = commandQueue.dequeue()
       if (cmdReply.success)
@@ -263,8 +266,8 @@ trait FSConnection extends LazyLogging {
     * @return Future[QueueOfferResult]
     */
   protected def publishNonMappingCommand(
-      command: FSCommand
-  ): Future[QueueOfferResult] = queue.offer(command)
+                                          command: FSCommand
+                                        ): Future[QueueOfferResult] = queue.offer(command)
 
   /**
     * publish FS command to FS, An enqueue command into `commandQueue` and add command with events promises into `eventMap`
@@ -290,9 +293,9 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def play(
-      fileName: String,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+            fileName: String,
+            config: ApplicationCommandConfig = ApplicationCommandConfig()
+          ): Future[CommandResponse] =
     publishCommand(PlayFile(fileName, config))
 
   /**
@@ -304,9 +307,9 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def transfer(
-      extension: String,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+                extension: String,
+                config: ApplicationCommandConfig = ApplicationCommandConfig()
+              ): Future[CommandResponse] =
     publishCommand(TransferTo(extension, config))
 
   /**
@@ -318,9 +321,9 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def hangup(
-      cause: Option[HangupCause] = Option.empty,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+              cause: Option[HangupCause] = Option.empty,
+              config: ApplicationCommandConfig = ApplicationCommandConfig()
+            ): Future[CommandResponse] =
     publishCommand(Hangup(cause, config))
 
   /**
@@ -331,8 +334,8 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def break(
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+             config: ApplicationCommandConfig = ApplicationCommandConfig()
+           ): Future[CommandResponse] =
     publishCommand(Break(config))
 
   /**
@@ -345,8 +348,8 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def answer(
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+              config: ApplicationCommandConfig = ApplicationCommandConfig()
+            ): Future[CommandResponse] =
     publishCommand(Answer(config))
 
   /**
@@ -380,9 +383,9 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def filter(
-      events: Map[EventName, String],
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+              events: Map[EventName, String],
+              config: ApplicationCommandConfig = ApplicationCommandConfig()
+            ): Future[CommandResponse] =
     publishCommand(Filter(events, config))
 
   /**
@@ -392,14 +395,14 @@ trait FSConnection extends LazyLogging {
     * Usage:
     * filter <Unique-ID> <uuid>
     *
-    * @param uuid : Channel uuid to filter in
+    * @param uuid   : Channel uuid to filter in
     * @param config : ApplicationCommandConfig
     * @return Future[CommandResponse]
     */
   def filterUUId(
-      uuid: String,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+                  uuid: String,
+                  config: ApplicationCommandConfig = ApplicationCommandConfig()
+                ): Future[CommandResponse] =
     publishCommand(FilterUUId(uuid, config))
 
   /**
@@ -414,9 +417,9 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def deleteFilter(
-      events: Map[EventName, String],
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+                    events: Map[EventName, String],
+                    config: ApplicationCommandConfig = ApplicationCommandConfig()
+                  ): Future[CommandResponse] =
     publishCommand(DeleteFilter(events, config))
 
   /**
@@ -426,14 +429,14 @@ trait FSConnection extends LazyLogging {
     * Usage:
     * filter delete <Unique-ID> <uuid>
     *
-    * @param uuid : Channel uuid to filter out
+    * @param uuid   : Channel uuid to filter out
     * @param config :ApplicationCommandConfig
     * @return Future[CommandResponse]
     */
   def deleteUUIdFilter(
-      uuid: String,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+                        uuid: String,
+                        config: ApplicationCommandConfig = ApplicationCommandConfig()
+                      ): Future[CommandResponse] =
     publishCommand(DeleteUUIdFilter(uuid, config))
 
   /**
@@ -448,12 +451,12 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def attXfer(
-      destination: String,
-      conferenceKey: Char = '0',
-      hangupKey: Char = '*',
-      cancelKey: Char = '#',
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+               destination: String,
+               conferenceKey: Char = '0',
+               hangupKey: Char = '*',
+               cancelKey: Char = '#',
+               config: ApplicationCommandConfig = ApplicationCommandConfig()
+             ): Future[CommandResponse] =
     publishCommand(
       AttXfer(destination, conferenceKey, hangupKey, cancelKey, config)
     )
@@ -471,10 +474,10 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def bridge(
-      targets: List[String],
-      dialType: DialType,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+              targets: List[String],
+              dialType: DialType,
+              config: ApplicationCommandConfig = ApplicationCommandConfig()
+            ): Future[CommandResponse] =
     publishCommand(Bridge(targets, dialType, config))
 
   /**
@@ -486,9 +489,9 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def intercept(
-      uuid: String,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+                 uuid: String,
+                 config: ApplicationCommandConfig = ApplicationCommandConfig()
+               ): Future[CommandResponse] =
     publishCommand(Intercept(uuid, config))
 
   /**
@@ -506,11 +509,11 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def read(min: Int, max: Int)(
-      soundFile: String,
-      variableName: String,
-      timeout: Duration,
-      terminators: List[Char] = List('#'),
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
+    soundFile: String,
+    variableName: String,
+    timeout: Duration,
+    terminators: List[Char] = List('#'),
+    config: ApplicationCommandConfig = ApplicationCommandConfig()
   ): Future[CommandResponse] =
     publishCommand(
       Read(
@@ -553,9 +556,9 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def sleep(
-      numberOfMillis: Duration,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+             numberOfMillis: Duration,
+             config: ApplicationCommandConfig = ApplicationCommandConfig()
+           ): Future[CommandResponse] =
     publishCommand(Sleep(numberOfMillis, config))
 
   /**
@@ -568,10 +571,10 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def setVar(
-      varName: String,
-      varValue: String,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+              varName: String,
+              varValue: String,
+              config: ApplicationCommandConfig = ApplicationCommandConfig()
+            ): Future[CommandResponse] =
     publishCommand(SetVar(varName, varValue, config))
 
   /**
@@ -581,8 +584,8 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def preAnswer(
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+                 config: ApplicationCommandConfig = ApplicationCommandConfig()
+               ): Future[CommandResponse] =
     publishCommand(PreAnswer(config))
 
   /**
@@ -603,12 +606,12 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def record(
-      filePath: String,
-      timeLimitSecs: Duration,
-      silenceThresh: Duration,
-      silenceHits: Option[Duration] = Option.empty,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+              filePath: String,
+              timeLimitSecs: Duration,
+              silenceThresh: Duration,
+              silenceHits: Option[Duration] = Option.empty,
+              config: ApplicationCommandConfig = ApplicationCommandConfig()
+            ): Future[CommandResponse] =
     publishCommand(
       Record(filePath, timeLimitSecs, silenceThresh, silenceHits, config)
     )
@@ -622,9 +625,9 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def recordSession(
-      filePathWithFormat: String,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+                     filePathWithFormat: String,
+                     config: ApplicationCommandConfig = ApplicationCommandConfig()
+                   ): Future[CommandResponse] =
     publishCommand(RecordSession(filePathWithFormat, config))
 
   /**
@@ -637,10 +640,10 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def sendDtmf(
-      dtmfDigits: String,
-      toneDuration: Option[Duration] = Option.empty,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+                dtmfDigits: String,
+                toneDuration: Option[Duration] = Option.empty,
+                config: ApplicationCommandConfig = ApplicationCommandConfig()
+              ): Future[CommandResponse] =
     publishCommand(SendDtmf(dtmfDigits, toneDuration, config))
 
   /**
@@ -652,9 +655,9 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def stopRecordSession(
-      filePath: String,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+                         filePath: String,
+                         config: ApplicationCommandConfig = ApplicationCommandConfig()
+                       ): Future[CommandResponse] =
     publishCommand(StopRecordSession(filePath, config))
 
   /**
@@ -670,8 +673,8 @@ trait FSConnection extends LazyLogging {
     * @return Future[CommandResponse]
     */
   def park(
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+            config: ApplicationCommandConfig = ApplicationCommandConfig()
+          ): Future[CommandResponse] =
     publishCommand(Park(config))
 
   /**
@@ -681,9 +684,9 @@ trait FSConnection extends LazyLogging {
     * @param config   : ApplicationCommandConfig
     */
   def log(
-      logLevel: String,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+           logLevel: String,
+           config: ApplicationCommandConfig = ApplicationCommandConfig()
+         ): Future[CommandResponse] =
     publishCommand(Log(logLevel, config))
 
   /**
@@ -692,8 +695,8 @@ trait FSConnection extends LazyLogging {
     * @param config : ApplicationCommandConfig
     */
   def exit(
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
-  ): Future[CommandResponse] =
+            config: ApplicationCommandConfig = ApplicationCommandConfig()
+          ): Future[CommandResponse] =
     publishCommand(Exit(config))
 }
 
@@ -710,10 +713,10 @@ object FSConnection {
     * @param executeComplete : Promise[EventMessage] this has to be complete when socket receive ChannelExecuteComplete event
     */
   case class CommandToQueue(
-      command: FSCommand,
-      executeEvent: Promise[EventMessage],
-      executeComplete: Promise[EventMessage]
-  )
+                             command: FSCommand,
+                             executeEvent: Promise[EventMessage],
+                             executeComplete: Promise[EventMessage]
+                           )
 
   /**
     * It is the response of FS command that has command and events Futures
@@ -724,11 +727,11 @@ object FSConnection {
     * @param executeComplete : Future[EventMessage] this is the ChannelExecuteComplete event response of FS command
     */
   case class CommandResponse(
-      command: FSCommand,
-      commandReply: Future[CommandReply],
-      executeEvent: Future[EventMessage],
-      executeComplete: Future[EventMessage]
-  )
+                              command: FSCommand,
+                              commandReply: Future[CommandReply],
+                              executeEvent: Future[EventMessage],
+                              executeComplete: Future[EventMessage]
+                            )
 
   /**
     *
@@ -761,9 +764,9 @@ object FSConnection {
     * @tparam FS type of Fs connection, it could be Inbound/Outbound
     */
   case class FSSocket[FS <: FSConnection](
-      fsConnection: FS,
-      channelData: ChannelData
-  )
+                                           fsConnection: FS,
+                                           channelData: ChannelData
+                                         )
 
   case class FSData(fSConnection: FSConnection, fsMessages: List[FSMessage])
 
