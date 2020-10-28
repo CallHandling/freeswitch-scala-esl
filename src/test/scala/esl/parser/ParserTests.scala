@@ -81,8 +81,8 @@ class ParserTests extends FlatSpec with Matchers with LazyLogging {
 
   it must "parse a multiple mixes messages" in {
     val input = Source.fromResource("data2.txt").mkString
-    val (messages, _) = DefaultParser.parse(input)
-    println(messages.mkString)
+    val (messages, buffer) = DefaultParser.parse(input)
+    buffer should be ("\nContent-Type: command/reply\nReply-Text: +OK")
     messages should not be empty
     messages.foreach(_.headers should not be empty)
   }
