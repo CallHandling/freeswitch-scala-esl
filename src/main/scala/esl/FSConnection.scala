@@ -34,7 +34,7 @@ import scala.collection.mutable
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutException}
 import scala.util.{Failure, Success}
-
+import java.util.UUID
 trait FSConnection extends LazyLogging {
   self =>
 
@@ -44,6 +44,7 @@ trait FSConnection extends LazyLogging {
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
   private[this] var unParsedBuffer = ""
 
+  val connectionId: String = UUID.randomUUID().toString
   /**
     * This queue maintain the promise of CommandReply for each respective FSCommand
     */
@@ -64,10 +65,10 @@ trait FSConnection extends LazyLogging {
     */
   private[this] val upstreamFlow: Flow[ByteString, FSData, _] =
     Flow[ByteString].map { data =>
-      logger.debug(s"Received data from FS:\n ${data.utf8String}")
+      logger.debug(s"Received data from FS for connection $connectionId :\n ${data.utf8String}")
       val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
       unParsedBuffer = buffer
-      logger.debug(s"Unparsed buffer for FS:\n ${unParsedBuffer}")
+      logger.debug(s"Unparsed buffer for FS for connection $connectionId :\n $unParsedBuffer")
       FSData(self, messages)
     }
 
@@ -76,7 +77,7 @@ trait FSConnection extends LazyLogging {
     */
   private[this] val downstreamFlow: Flow[FSCommand, ByteString, _] =
     Flow.fromFunction { fsCommand =>
-      logger.debug(s"Sending command to FS: ${fsCommand.toString}")
+      logger.debug(s"Sending command to FS for FS for connection $connectionId : ${fsCommand.toString}")
       ByteString(fsCommand.toString)
     }
 
