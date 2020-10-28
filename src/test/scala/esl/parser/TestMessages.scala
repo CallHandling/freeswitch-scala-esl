@@ -4,6 +4,7 @@ package esl.parser
   * Created by nathan on 08/09/16.
   */
 object TestMessages {
+
   val connectEvent = """Event-Name: CHANNEL_DATA
                        |Core-UUID: 2f5dcf01-d1c2-4b77-abe4-dca29127416b
                        |FreeSWITCH-Hostname: dan-win8-dev

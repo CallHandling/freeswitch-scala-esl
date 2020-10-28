@@ -19,6 +19,8 @@ package esl.parser
 import com.typesafe.scalalogging.LazyLogging
 import esl.domain.ContentTypes
 import org.scalatest.{FlatSpec, Matchers}
+import scala.Console.println
+import scala.io.Source
 
 class ParserTests extends FlatSpec with Matchers with LazyLogging {
   behavior of "A Parser"
@@ -73,6 +75,14 @@ class ParserTests extends FlatSpec with Matchers with LazyLogging {
 
   it must "parse a set hangup event" in {
     val (messages, _) = DefaultParser.parse(TestMessages.hangUpEvent)
+    messages should not be empty
+    messages.foreach(_.headers should not be empty)
+  }
+
+  it must "parse a multiple mixes messages" in {
+    val input = Source.fromResource("data2.txt").mkString
+    val (messages, _) = DefaultParser.parse(input)
+    println(messages.mkString)
     messages should not be empty
     messages.foreach(_.headers should not be empty)
   }

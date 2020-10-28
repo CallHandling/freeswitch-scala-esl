@@ -67,6 +67,7 @@ trait FSConnection extends LazyLogging {
       logger.debug(s"Received data from FS:\n ${data.utf8String}")
       val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
       unParsedBuffer = buffer
+      logger.debug(s"Unparsed buffer for FS:\n ${unParsedBuffer}")
       FSData(self, messages)
     }
 
@@ -75,7 +76,7 @@ trait FSConnection extends LazyLogging {
     */
   private[this] val downstreamFlow: Flow[FSCommand, ByteString, _] =
     Flow.fromFunction { fsCommand =>
-      logger.info(s"Sending command to FS: ${fsCommand.toString}")
+      logger.debug(s"Sending command to FS: ${fsCommand.toString}")
       ByteString(fsCommand.toString)
     }
 
@@ -139,12 +140,12 @@ trait FSConnection extends LazyLogging {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
           if (command.success) {
-            publishNonMappingCommand(LingerCommand).map(_ =>
-              fsConnectionPromise.complete(
-                Success(FSSocket(fsConnection, ChannelData(command.headers)))
-              )
+            fsConnectionPromise.complete(
+              Success(FSSocket(fsConnection, ChannelData(command.headers)))
             )
             hasConnected = true
+            if(lingering) publishNonMappingCommand(LingerCommand)
+            fsData.fsMessages.dropWhile(_ == command)
           } else {
             fsConnectionPromise.complete(
               Failure(
@@ -153,18 +154,40 @@ trait FSConnection extends LazyLogging {
                 )
               )
             )
+            fsData
           }
-          fsData
+        case _ => fsData
+      }
+    }
+    lazy val doLinger = (fsData: FSData) => {
+      fsData.fsMessages match {
+        case ::(command: CommandReply, _) =>
+          if (command.success && command.replyText.getOrElse("") == "+OK will linger") {
+            isLingering = true
+            fsData.fsMessages.dropWhile(_ == command)
+          } else {
+            fsConnectionPromise.complete(
+              Failure(
+                new Exception(
+                  s"Socket failed to linger: ${command.errorMessage}"
+                )
+              )
+            )
+            fsData
+          }
         case _ => fsData
       }
     }
     Flow[FSData]
-      .map { fSData =>
-        if (!hasConnected) connectToFS(fSData)
-        else {
-          fSData.fsMessages.foreach(handleFSMessage)
-          fSData
+      .map {
+        def containsCmdReply(fSData: FSData) = {
+          fSData.fsMessages.count(a => a.contentType == ContentTypes.commandReply) > 0
         }
+        fSData =>
+        if (containsCmdReply(fSData) && !hasConnected) connectToFS(fSData)
+        if (containsCmdReply(fSData) && lingering && !isLingering && hasConnected) doLinger(fSData)
+        fSData.fsMessages.foreach(handleFSMessage)
+        fSData
       }
       .toMat(futureSink)(Keep.right)
   }
