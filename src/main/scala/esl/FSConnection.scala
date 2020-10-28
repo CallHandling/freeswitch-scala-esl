@@ -35,7 +35,8 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutException}
 import scala.util.{Failure, Success}
 import java.util.UUID
-trait FSConnection extends LazyLogging {
+
+abstract class FSConnection extends LazyLogging {
   self =>
 
   lazy private[this] val parser: Parser = DefaultParser
@@ -44,7 +45,10 @@ trait FSConnection extends LazyLogging {
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
   private[this] var unParsedBuffer = ""
 
-  var connectionId: String = UUID.randomUUID().toString
+  private[this] var connectionId: String = UUID.randomUUID().toString
+
+  def getConnectionId: String = connectionId
+
   /**
     * This queue maintain the promise of CommandReply for each respective FSCommand
     */
