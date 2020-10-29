@@ -1,7 +1,7 @@
 import InboundTest.system
 import akka.Done
 import akka.actor.ActorSystem
-import akka.event.{Logging, LoggingAdapter}
+import akka.event.{Logging, MarkerLoggingAdapter}
 import akka.stream.{Materializer, NeverMaterializedException}
 import akka.stream.scaladsl.Sink
 import com.typesafe.scalalogging.LazyLogging
@@ -20,7 +20,7 @@ object OutboundTest extends App with LazyLogging {
   implicit val system = ActorSystem("esl-test")
   implicit val actorMaterializer = Materializer(system)
   implicit val ec = system.dispatcher
-  implicit val adapter: LoggingAdapter = Logging(system, "hubbub-esl-fs")
+  implicit val adapter: MarkerLoggingAdapter = Logging.withMarker(system, "hubbub-esl-fs")
 
   OutboundServer("127.0.0.1", 8084)
     .startWith(fsSocket => {
