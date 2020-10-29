@@ -154,6 +154,7 @@ abstract class FSConnection extends LazyLogging {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
           if (command.success) {
+            connectionId = command.headers.get(HeaderNames.uniqueId).getOrElse(connectionId)
             fsConnectionPromise.complete(
               Success(FSSocket(fsConnection, ChannelData(command.headers)))
             )
