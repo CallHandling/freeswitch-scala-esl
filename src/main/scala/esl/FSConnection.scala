@@ -35,13 +35,15 @@ import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutExcep
 import scala.util.{Failure, Success}
 import java.util.UUID
 
-import akka.event.{LogMarker}
+import akka.event.{LogMarker, LoggingAdapter}
+import com.typesafe.scalalogging.LazyLogging
 
-abstract class FSConnection {
+abstract class FSConnection extends LazyLogging {
   self =>
   lazy private[this] val parser: Parser = DefaultParser
   implicit protected val system: ActorSystem
   implicit protected val materializer: Materializer
+  implicit protected val adapter: LoggingAdapter
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
 
 

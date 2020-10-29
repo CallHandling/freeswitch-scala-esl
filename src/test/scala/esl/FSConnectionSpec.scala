@@ -1,7 +1,7 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.event.{Logging}
+import akka.event.{Logging, LoggingAdapter}
 import akka.stream.scaladsl.{BidiFlow, GraphDSL, Keep, RunnableGraph, Sink, Source}
 import akka.stream.{ClosedShape, Materializer}
 import akka.testkit.TestKit
@@ -20,9 +20,11 @@ class FSConnectionSpec extends TestKit(ActorSystem("esl-test"))
 
   trait FSConnectionFixture {
     implicit val ec: ExecutionContext = system.dispatcher
+    implicit val adapter: LoggingAdapter = Logging(system, "hubbub-esl-fs")
     val connection = new FSConnection {
       override implicit protected val system: ActorSystem = _system
       override implicit protected val materializer: Materializer = actorMaterializer
+      override implicit protected val adapter: LoggingAdapter = adapter
     }
 
     def runGraph(bidiFlow: BidiFlow[ByteString, FSData, FSCommand, ByteString, _],

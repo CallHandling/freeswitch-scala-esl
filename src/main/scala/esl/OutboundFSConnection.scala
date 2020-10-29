@@ -17,15 +17,18 @@
 package esl
 
 import akka.actor.ActorSystem
+import akka.event.LoggingAdapter
 import akka.stream.{Materializer, QueueOfferResult}
 import esl.domain.CallCommands._
 
 import scala.concurrent.Future
 
-case class OutboundFSConnection()(implicit actorSystem: ActorSystem, actorMaterializer: Materializer)
+case class OutboundFSConnection()(implicit actorSystem: ActorSystem, actorMaterializer: Materializer, adapterIn:LoggingAdapter)
   extends FSConnection {
+
   override implicit val system: ActorSystem = actorSystem
   override implicit val materializer: Materializer = actorMaterializer
+  override implicit val adapter: LoggingAdapter = adapterIn
   /**
     * Connect with freeswitch by sending `connect` command
     *
