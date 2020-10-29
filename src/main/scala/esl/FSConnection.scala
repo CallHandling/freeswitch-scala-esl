@@ -79,8 +79,11 @@ abstract class FSConnection extends LazyLogging {
     Flow[ByteString].statefulMapConcat(() => {
       var unParsedBuffer: String = ""
       data => {
-        val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
+        val fsPacket = data.utf8String
+        logger.debug(s"Connection Id: $getConnectionId : Unparsed data before FS Data: $unParsedBuffer, Received FS Data: $fsPacket")
+        val (messages, buffer) = parser.parse(unParsedBuffer + fsPacket)
         unParsedBuffer = buffer
+        logger.debug(s"Connection Id: $getConnectionId : Unparsed data After FS Data parsing: $unParsedBuffer")
         List(FSData(self, messages))
       }
     })
