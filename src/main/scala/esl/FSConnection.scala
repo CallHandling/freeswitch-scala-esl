@@ -169,9 +169,11 @@ abstract class FSConnection extends LazyLogging {
         case _ => (fsData, hasConnected)
       }
     }
+
     lazy val doLinger = (fsData: FSData, isLingering:Boolean) => {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
+          logger.debug(s"Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}")
           if (command.success && command.replyText.getOrElse("") == "+OK will linger") {
             (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)), true)
           } else {
