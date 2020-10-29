@@ -17,7 +17,7 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.event.{Logging, LoggingAdapter}
+import akka.event.{LogMarker, LoggingAdapter}
 import akka.stream.{Attributes, Materializer, NeverMaterializedException}
 import akka.stream.scaladsl.Tcp.IncomingConnection
 import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
@@ -70,13 +70,15 @@ object OutboundServer {
   )(implicit
       system: ActorSystem,
       materializer: Materializer,
-      adapter: LoggingAdapter
+     adapter: LoggingAdapter
   ): OutboundServer =
     new OutboundServer(interface, port, timeout, linger)
 
 }
 
-class OutboundServer(address: String, port: Int, timeout: FiniteDuration, linger: Boolean)(
+class OutboundServer(address: String, port: Int,
+                     timeout: FiniteDuration,
+                     linger: Boolean)(
     implicit
     system: ActorSystem,
     materializer: Materializer,
@@ -86,7 +88,7 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration, linger
 
   def this(
       config: Config
-  )(implicit system: ActorSystem, materializer: Materializer,adapter: LoggingAdapter) =
+  )(implicit system: ActorSystem, materializer: Materializer, adapter: LoggingAdapter) =
     this(
       config.getString(OutboundServer.address),
       config.getInt(OutboundServer.port),
@@ -138,10 +140,21 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration, linger
         )
         val (source, protocol) = flow(fsConnection)
 
+        source.logWithMarker(name = "esl-source", e => LogMarker(name = "esl-source", properties = Map("element" -> e, "connection" -> fsConnection.getConnectionId)))
+          .addAttributes(
+            Attributes.logLevels(
+              onElement = Attributes.LogLevels.Info,
+              onFinish = Attributes.LogLevels.Info,
+              onFailure = Attributes.LogLevels.Error))
+
         val (_, closed: Future[Any]) = connection.flow
-          .join(protocol).log("hubbub-esl-fs")
-          .withAttributes(Attributes
-            .logLevels(onElement = Logging.WarningLevel, onFinish = Logging.InfoLevel, onFailure = Logging.DebugLevel))
+          .join(protocol)
+          .logWithMarker(name = "esl-connection", e => LogMarker(name = "esl-connection", properties = Map("element" -> e, "connection" -> fsConnection.getConnectionId)))
+          .addAttributes(
+            Attributes.logLevels(
+              onElement = Attributes.LogLevels.Info,
+              onFinish = Attributes.LogLevels.Info,
+              onFailure = Attributes.LogLevels.Error))
           .runWith(source, sink)
 
         val closedConn = closed.transform {

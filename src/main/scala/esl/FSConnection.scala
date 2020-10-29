@@ -35,11 +35,10 @@ import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutExcep
 import scala.util.{Failure, Success}
 import java.util.UUID
 
-import akka.event.LoggingAdapter
+import akka.event.{LogMarker}
 
 abstract class FSConnection {
   self =>
-  implicit protected val adapter: LoggingAdapter
   lazy private[this] val parser: Parser = DefaultParser
   implicit protected val system: ActorSystem
   implicit protected val materializer: Materializer
@@ -61,6 +60,12 @@ abstract class FSConnection {
 
   protected[this] lazy val (queue, source) = Source
     .queue[FSCommand](50, OverflowStrategy.backpressure)
+    .logWithMarker(name = "esl-queue-stream", e => LogMarker(name = "esl-queue-stream", properties = Map("element" -> e, "connection" -> connectionId)))
+    .addAttributes(
+      Attributes.logLevels(
+        onElement = Attributes.LogLevels.Info,
+        onFinish = Attributes.LogLevels.Info,
+        onFailure = Attributes.LogLevels.Error))
     .toMat(Sink.asPublisher(false))(Keep.both)
     .run()
 
@@ -74,8 +79,6 @@ abstract class FSConnection {
       data => {
         val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
         unParsedBuffer = buffer
-        //adapter.debug(s"Parsed messages for FS for connection $connectionId :\n ${messages.mkString("\n")}")
-        //adapter.debug(s"Unparsed buffer for FS for connection $connectionId :\n $unParsedBuffer")
         List(FSData(self, messages))
       }
     })
@@ -85,8 +88,6 @@ abstract class FSConnection {
     */
   private[this] val downstreamFlow: Flow[FSCommand, ByteString, _] =
     Flow.fromFunction { fsCommand =>
-
-      //adapter.debug(s"Sending command to FS for FS for connection $connectionId : ${fsCommand.toString}")
       ByteString(fsCommand.toString)
     }
 
@@ -151,8 +152,6 @@ abstract class FSConnection {
             fsConnectionPromise.complete(
               Success(FSSocket(fsConnection, ChannelData(command.headers)))
             )
-            //adapter.debug(s"Completing connect for $connectionId")
-            //connectionId = command.headers(HeaderNames.uniqueId)
             if (lingering) publishNonMappingCommand(LingerCommand)
             (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),true)
           } else {
@@ -172,7 +171,6 @@ abstract class FSConnection {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
           if (command.success && command.replyText.getOrElse("") == "+OK will linger") {
-            //adapter.debug(s"Completing linger for $connectionId")
             (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)), true)
           } else {
             fsConnectionPromise.complete(
@@ -208,10 +206,15 @@ abstract class FSConnection {
         }
         else fSData
         //Send every message
-        //adapter.debug(s"DSData flow for $connectionId:\n${fSData.fsMessages.mkString}")
         List(updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f))))
       }
-    }).toMat(futureSink)(Keep.right)
+    }).logWithMarker(name = "esl-main", e => LogMarker(name = "esl-main", properties = Map("element" -> e, "connection" -> fsConnection.getConnectionId)))
+      .addAttributes(
+        Attributes.logLevels(
+          onElement = Attributes.LogLevels.Info,
+          onFinish = Attributes.LogLevels.Info,
+          onFailure = Attributes.LogLevels.Error))
+      .toMat(futureSink)(Keep.right)
 
   }
 
@@ -263,8 +266,7 @@ abstract class FSConnection {
     * @param eventMessage : EventMessage
     * @return EventMessage
     */
-  private def handleFSEventMessage(eventMessage: EventMessage)(implicit adapter: LoggingAdapter): EventMessage = {
-    //adapter.debug(s"handleFSEventMessage $connectionId:\n${eventMessage.toString}")
+  private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
     eventMessage.applicationUuid.flatMap(eventMap.lift).foreach {
       commandToQueue =>
         if (eventMessage.eventName.contains(EventNames.ChannelExecute))

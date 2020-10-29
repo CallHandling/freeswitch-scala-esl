@@ -21,6 +21,7 @@ object OutboundTest extends App with LazyLogging {
   implicit val actorMaterializer = Materializer(system)
   implicit val ec = system.dispatcher
   implicit val adapter: LoggingAdapter = Logging(system, "hubbub-esl-fs")
+
   OutboundServer("127.0.0.1", 8084)
     .startWith(fsSocket => {
 

@@ -18,7 +18,6 @@ package esl
 
 import akka.NotUsed
 import akka.actor.ActorSystem
-import akka.event.{Logging, LoggingAdapter}
 import akka.stream.Materializer
 import akka.stream.scaladsl.{BidiFlow, Flow, Sink, Source, Tcp}
 import akka.util.ByteString
@@ -44,7 +43,7 @@ object InboundServer {
     * @return OutboundServer
     */
   def apply(config: Config)
-           (implicit system: ActorSystem, materializer: Materializer, adapter: LoggingAdapter): InboundServer =
+           (implicit system: ActorSystem, materializer: Materializer): InboundServer =
     new InboundServer(config)
 
   /**
@@ -57,17 +56,17 @@ object InboundServer {
     * @return OutboundServer
     */
   def apply(interface: String, port: Int, timeout: FiniteDuration = defaultTimeout,linger: Boolean = true)
-           (implicit system: ActorSystem, materializer: Materializer,adapter: LoggingAdapter): InboundServer =
+           (implicit system: ActorSystem, materializer: Materializer): InboundServer =
     new InboundServer(interface, port, timeout, linger)
 
 }
 
 class InboundServer(interface: String, port: Int, timeout: FiniteDuration, linger:Boolean)
-                   (implicit system: ActorSystem, materializer: Materializer, adapter: LoggingAdapter) {
+                   (implicit system: ActorSystem, materializer: Materializer) {
   implicit private val ec = system.dispatcher
 
   def this(config: Config)
-          (implicit system: ActorSystem, materializer: Materializer,adapter: LoggingAdapter) =
+          (implicit system: ActorSystem, materializer: Materializer) =
     this(config.getString(InboundServer.address),
       config.getInt(InboundServer.port),
       Duration(config.getDuration(InboundServer.fsTimeout).getSeconds, SECONDS),
