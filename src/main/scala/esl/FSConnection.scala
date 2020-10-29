@@ -22,7 +22,7 @@ import akka.pattern.after
 import akka.stream._
 import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
 import akka.util.ByteString
-import esl.FSConnection._
+import esl.FSConnection.{FSData, _}
 import esl.domain.CallCommands._
 import esl.domain.EventNames.EventName
 import esl.domain.HangupCauses.HangupCause
@@ -44,7 +44,7 @@ abstract class FSConnection {
   implicit protected val system: ActorSystem
   implicit protected val materializer: Materializer
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
-  private[this] var unParsedBuffer = ""
+
 
   private[this] var connectionId: String = UUID.randomUUID().toString
 
@@ -69,15 +69,16 @@ abstract class FSConnection {
     * will append to the next received packets. So we will get the complete parsed packet.
     */
   private[this] val upstreamFlow: Flow[ByteString, FSData, _] =
-    Flow[ByteString].map { data =>
-      //adapter.debug(s"Received data from FS for connection $connectionId :\n ${data.utf8String}")
-      val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
-      unParsedBuffer = buffer
-      //adapter.debug(s"Parsed messages for FS for connection $connectionId :\n ${messages.mkString("\n")}")
-      //adapter.debug(s"Unparsed buffer for FS for connection $connectionId :\n $unParsedBuffer")
-
-      FSData(self, messages)
-    }
+    Flow[ByteString].statefulMapConcat(() => {
+      var unParsedBuffer: String = ""
+      data => {
+        val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
+        unParsedBuffer = buffer
+        //adapter.debug(s"Parsed messages for FS for connection $connectionId :\n ${messages.mkString("\n")}")
+        //adapter.debug(s"Unparsed buffer for FS for connection $connectionId :\n $unParsedBuffer")
+        List(FSData(self, messages))
+      }
+    })
 
   /**
     * It will convert the FS command into ByteString
@@ -123,8 +124,6 @@ abstract class FSConnection {
                                      timeout: FiniteDuration,
                                      lingering: Boolean
                                    ) = {
-    var hasConnected = false
-    var isLingering = false
     lazy val timeoutFuture =
       after(duration = timeout, using = system.scheduler) {
         Future.failed(
@@ -145,7 +144,7 @@ abstract class FSConnection {
           case success => success
         })
     )
-    lazy val connectToFS = (fsData: FSData) => {
+    lazy val connectToFS = (fsData: FSData, hasConnected:Boolean) => {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
           if (command.success) {
@@ -153,10 +152,9 @@ abstract class FSConnection {
               Success(FSSocket(fsConnection, ChannelData(command.headers)))
             )
             //adapter.debug(s"Completing connect for $connectionId")
-            connectionId = command.headers(HeaderNames.uniqueId)
-            hasConnected = true
+            //connectionId = command.headers(HeaderNames.uniqueId)
             if (lingering) publishNonMappingCommand(LingerCommand)
-            fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command))
+            (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),true)
           } else {
             fsConnectionPromise.complete(
               Failure(
@@ -165,18 +163,17 @@ abstract class FSConnection {
                 )
               )
             )
-            fsData
+            (fsData, hasConnected)
           }
-        case _ => fsData
+        case _ => (fsData, hasConnected)
       }
     }
-    lazy val doLinger = (fsData: FSData) => {
+    lazy val doLinger = (fsData: FSData, isLingering:Boolean) => {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
           if (command.success && command.replyText.getOrElse("") == "+OK will linger") {
-            isLingering = true
             //adapter.debug(s"Completing linger for $connectionId")
-            fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command))
+            (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)), true)
           } else {
             fsConnectionPromise.complete(
               Failure(
@@ -185,9 +182,9 @@ abstract class FSConnection {
                 )
               )
             )
-            fsData
+            (fsData, isLingering)
           }
-        case _ => fsData
+        case _ => (fsData, isLingering)
       }
     }
 
@@ -195,17 +192,27 @@ abstract class FSConnection {
       fSData.fsMessages.count(a => a.contentType == ContentTypes.commandReply) > 0
     }
 
-    Flow[FSData]
-      .map {
-        fSData =>
-          val updatedFSData = if (containsCmdReply(fSData) && !hasConnected) connectToFS(fSData)
-          else if (containsCmdReply(fSData) && lingering && !isLingering && hasConnected) doLinger(fSData)
-          else fSData
-          //Send every message
-          //adapter.debug(s"DSData flow for $connectionId:\n${fSData.fsMessages.mkString}")
-          updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f)))
+    Flow[FSData].statefulMapConcat( () => {
+      var hasConnected: Boolean = false
+      var isLingering: Boolean = false
+      fSData => {
+        val updatedFSData = if (containsCmdReply(fSData) && !hasConnected) {
+          val con = connectToFS(fSData,hasConnected)
+          hasConnected=con._2
+          con._1
+        }
+        else if (containsCmdReply(fSData) && lingering && !isLingering && hasConnected) {
+          val ling = doLinger(fSData,isLingering)
+          isLingering=ling._2
+          ling._1
+        }
+        else fSData
+        //Send every message
+        //adapter.debug(s"DSData flow for $connectionId:\n${fSData.fsMessages.mkString}")
+        List(updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f))))
       }
-      .toMat(futureSink)(Keep.right)
+    }).toMat(futureSink)(Keep.right)
+
   }
 
   /**
