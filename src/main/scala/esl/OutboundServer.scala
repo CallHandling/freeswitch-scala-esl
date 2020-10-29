@@ -148,7 +148,6 @@ class OutboundServer(address: String, port: Int,
               onFailure = Attributes.LogLevels.Error))
 
         val (_, closed: Future[Any]) = connection.flow
-          .via(Framing.delimiter(ByteString("\n"), maximumFrameLength = 1024, allowTruncation = true))
           .join(protocol)
           .logWithMarker(name = "esl-connection", e => LogMarker(name = "esl-connection", properties = Map("element" -> e, "connection" -> fsConnection.getConnectionId)))
           .addAttributes(

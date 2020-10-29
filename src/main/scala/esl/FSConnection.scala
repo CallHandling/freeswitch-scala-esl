@@ -177,13 +177,6 @@ abstract class FSConnection extends LazyLogging {
           if (command.success && command.replyText.getOrElse("") == "+OK will linger") {
             (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)), true)
           } else {
-            fsConnectionPromise.complete(
-              Failure(
-                new Exception(
-                  s"Socket failed to linger: ${command.errorMessage}"
-                )
-              )
-            )
             (fsData, isLingering)
           }
         case _ => (fsData, isLingering)
