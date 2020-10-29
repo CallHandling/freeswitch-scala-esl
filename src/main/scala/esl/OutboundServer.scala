@@ -17,7 +17,8 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.stream.{Materializer, NeverMaterializedException}
+import akka.event.{Logging, LoggingAdapter}
+import akka.stream.{Attributes, Materializer, NeverMaterializedException}
 import akka.stream.scaladsl.Tcp.IncomingConnection
 import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
 import akka.util.ByteString
@@ -47,7 +48,8 @@ object OutboundServer {
     */
   def apply(config: Config)(implicit
       system: ActorSystem,
-      materializer: Materializer
+      materializer: Materializer,
+      adapter: LoggingAdapter
   ): OutboundServer =
     new OutboundServer(config)
 
@@ -67,7 +69,8 @@ object OutboundServer {
       linger: Boolean = true
   )(implicit
       system: ActorSystem,
-      materializer: Materializer
+      materializer: Materializer,
+      adapter: LoggingAdapter
   ): OutboundServer =
     new OutboundServer(interface, port, timeout, linger)
 
@@ -76,13 +79,14 @@ object OutboundServer {
 class OutboundServer(address: String, port: Int, timeout: FiniteDuration, linger: Boolean)(
     implicit
     system: ActorSystem,
-    materializer: Materializer
+    materializer: Materializer,
+    adapter: LoggingAdapter
 ) extends LazyLogging {
   implicit private val ec = system.dispatcher
 
   def this(
       config: Config
-  )(implicit system: ActorSystem, materializer: Materializer) =
+  )(implicit system: ActorSystem, materializer: Materializer,adapter: LoggingAdapter) =
     this(
       config.getString(OutboundServer.address),
       config.getInt(OutboundServer.port),
@@ -133,8 +137,11 @@ class OutboundServer(address: String, port: Int, timeout: FiniteDuration, linger
           linger
         )
         val (source, protocol) = flow(fsConnection)
+
         val (_, closed: Future[Any]) = connection.flow
-          .join(protocol)
+          .join(protocol).log("hubbub-esl-fs")
+          .withAttributes(Attributes
+            .logLevels(onElement = Logging.WarningLevel, onFinish = Logging.InfoLevel, onFailure = Logging.DebugLevel))
           .runWith(source, sink)
 
         val closedConn = closed.transform {

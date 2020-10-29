@@ -17,6 +17,7 @@
 package esl
 
 import akka.actor.ActorSystem
+import akka.event.{Logging, LoggingAdapter}
 import akka.stream.{Materializer, QueueOfferResult}
 import esl.domain.CallCommands._
 
@@ -26,7 +27,7 @@ case class OutboundFSConnection()(implicit actorSystem: ActorSystem, actorMateri
   extends FSConnection {
   override implicit val system: ActorSystem = actorSystem
   override implicit val materializer: Materializer = actorMaterializer
-
+  override implicit val adapter: LoggingAdapter = Logging(system, "hubbub-esl-fs")
   /**
     * Connect with freeswitch by sending `connect` command
     *

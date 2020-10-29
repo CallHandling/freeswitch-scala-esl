@@ -22,7 +22,6 @@ import akka.pattern.after
 import akka.stream._
 import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
 import akka.util.ByteString
-import com.typesafe.scalalogging.LazyLogging
 import esl.FSConnection._
 import esl.domain.CallCommands._
 import esl.domain.EventNames.EventName
@@ -36,9 +35,11 @@ import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutExcep
 import scala.util.{Failure, Success}
 import java.util.UUID
 
-abstract class FSConnection extends LazyLogging {
-  self =>
+import akka.event.LoggingAdapter
 
+abstract class FSConnection {
+  self =>
+  implicit protected val adapter: LoggingAdapter
   lazy private[this] val parser: Parser = DefaultParser
   implicit protected val system: ActorSystem
   implicit protected val materializer: Materializer
@@ -69,11 +70,12 @@ abstract class FSConnection extends LazyLogging {
     */
   private[this] val upstreamFlow: Flow[ByteString, FSData, _] =
     Flow[ByteString].map { data =>
-      logger.debug(s"Received data from FS for connection $connectionId :\n ${data.utf8String}")
+    this.log("asd")
+     adapter.debug(s"Received data from FS for connection $connectionId :\n ${data.utf8String}")
       val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
       unParsedBuffer = buffer
-      logger.debug(s"Parsed messages for FS for connection $connectionId :\n ${messages.mkString("\n")}")
-      logger.debug(s"Unparsed buffer for FS for connection $connectionId :\n $unParsedBuffer")
+      adapter.debug(s"Parsed messages for FS for connection $connectionId :\n ${messages.mkString("\n")}")
+      adapter.debug(s"Unparsed buffer for FS for connection $connectionId :\n $unParsedBuffer")
 
       FSData(self, messages)
     }
@@ -83,7 +85,8 @@ abstract class FSConnection extends LazyLogging {
     */
   private[this] val downstreamFlow: Flow[FSCommand, ByteString, _] =
     Flow.fromFunction { fsCommand =>
-      logger.debug(s"Sending command to FS for FS for connection $connectionId : ${fsCommand.toString}")
+
+      adapter.debug(s"Sending command to FS for FS for connection $connectionId : ${fsCommand.toString}")
       ByteString(fsCommand.toString)
     }
 
@@ -150,7 +153,7 @@ abstract class FSConnection extends LazyLogging {
             fsConnectionPromise.complete(
               Success(FSSocket(fsConnection, ChannelData(command.headers)))
             )
-            logger.debug(s"Completing connect for $connectionId")
+            adapter.debug(s"Completing connect for $connectionId")
             connectionId = command.headers(HeaderNames.uniqueId)
             hasConnected = true
             if (lingering) publishNonMappingCommand(LingerCommand)
@@ -173,7 +176,7 @@ abstract class FSConnection extends LazyLogging {
         case ::(command: CommandReply, _) =>
           if (command.success && command.replyText.getOrElse("") == "+OK will linger") {
             isLingering = true
-            logger.debug(s"Completing linger for $connectionId")
+            adapter.debug(s"Completing linger for $connectionId")
             fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command))
           } else {
             fsConnectionPromise.complete(
@@ -200,7 +203,7 @@ abstract class FSConnection extends LazyLogging {
           else if (containsCmdReply(fSData) && lingering && !isLingering && hasConnected) doLinger(fSData)
           else fSData
           //Send every message
-          logger.debug(s"DSData flow for $connectionId:\n${fSData.fsMessages.mkString}")
+          adapter.debug(s"DSData flow for $connectionId:\n${fSData.fsMessages.mkString}")
           updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f)))
       }
       .toMat(futureSink)(Keep.right)
@@ -254,8 +257,8 @@ abstract class FSConnection extends LazyLogging {
     * @param eventMessage : EventMessage
     * @return EventMessage
     */
-  private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
-    logger.debug(s"handleFSEventMessage $connectionId:\n${eventMessage.toString}")
+  private def handleFSEventMessage(eventMessage: EventMessage)(implicit adapter: LoggingAdapter): EventMessage = {
+    adapter.debug(s"handleFSEventMessage $connectionId:\n${eventMessage.toString}")
     eventMessage.applicationUuid.flatMap(eventMap.lift).foreach {
       commandToQueue =>
         if (eventMessage.eventName.contains(EventNames.ChannelExecute))
