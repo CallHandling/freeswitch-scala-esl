@@ -17,7 +17,7 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.event.LoggingAdapter
+import akka.event.MarkerLoggingAdapter
 import akka.stream.{Materializer, QueueOfferResult}
 import esl.FSConnection.CommandResponse
 import esl.domain.ApplicationCommandConfig
@@ -25,11 +25,11 @@ import esl.domain.CallCommands.AuthCommand
 
 import scala.concurrent.Future
 
-case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMaterializer: Materializer, adapterIn: LoggingAdapter)
+case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMaterializer: Materializer, adapterIn: MarkerLoggingAdapter)
   extends FSConnection {
   override implicit val materializer: Materializer = actorMaterializer
   override implicit val system: ActorSystem = actorSystem
-  override implicit val adapter: LoggingAdapter = adapterIn
+  override implicit val adapter: MarkerLoggingAdapter = adapterIn
 
   /**
     * Send auth command to freeswitch

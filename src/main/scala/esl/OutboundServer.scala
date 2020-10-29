@@ -17,10 +17,10 @@
 package esl
 
 import akka.actor.ActorSystem
-import akka.event.{LogMarker, LoggingAdapter}
+import akka.event.{LogMarker, MarkerLoggingAdapter}
 import akka.stream.{Attributes, Materializer, NeverMaterializedException}
 import akka.stream.scaladsl.Tcp.IncomingConnection
-import akka.stream.scaladsl.{BidiFlow, Sink, Source, Tcp}
+import akka.stream.scaladsl.{BidiFlow, Framing, Sink, Source, Tcp}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
 import com.typesafe.config.Config
@@ -49,7 +49,7 @@ object OutboundServer {
   def apply(config: Config)(implicit
       system: ActorSystem,
       materializer: Materializer,
-      adapter: LoggingAdapter
+      adapter: MarkerLoggingAdapter
   ): OutboundServer =
     new OutboundServer(config)
 
@@ -70,7 +70,7 @@ object OutboundServer {
   )(implicit
       system: ActorSystem,
       materializer: Materializer,
-     adapter: LoggingAdapter
+     adapter: MarkerLoggingAdapter
   ): OutboundServer =
     new OutboundServer(interface, port, timeout, linger)
 
@@ -82,13 +82,13 @@ class OutboundServer(address: String, port: Int,
     implicit
     system: ActorSystem,
     materializer: Materializer,
-    adapter: LoggingAdapter
+    adapter: MarkerLoggingAdapter
 ) extends LazyLogging {
   implicit private val ec = system.dispatcher
 
   def this(
       config: Config
-  )(implicit system: ActorSystem, materializer: Materializer, adapter: LoggingAdapter) =
+  )(implicit system: ActorSystem, materializer: Materializer, adapter: MarkerLoggingAdapter) =
     this(
       config.getString(OutboundServer.address),
       config.getInt(OutboundServer.port),
