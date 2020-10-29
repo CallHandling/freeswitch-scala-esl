@@ -70,12 +70,11 @@ abstract class FSConnection {
     */
   private[this] val upstreamFlow: Flow[ByteString, FSData, _] =
     Flow[ByteString].map { data =>
-    this.log("asd")
-     adapter.debug(s"Received data from FS for connection $connectionId :\n ${data.utf8String}")
+      //adapter.debug(s"Received data from FS for connection $connectionId :\n ${data.utf8String}")
       val (messages, buffer) = parser.parse(unParsedBuffer + data.utf8String)
       unParsedBuffer = buffer
-      adapter.debug(s"Parsed messages for FS for connection $connectionId :\n ${messages.mkString("\n")}")
-      adapter.debug(s"Unparsed buffer for FS for connection $connectionId :\n $unParsedBuffer")
+      //adapter.debug(s"Parsed messages for FS for connection $connectionId :\n ${messages.mkString("\n")}")
+      //adapter.debug(s"Unparsed buffer for FS for connection $connectionId :\n $unParsedBuffer")
 
       FSData(self, messages)
     }
@@ -86,7 +85,7 @@ abstract class FSConnection {
   private[this] val downstreamFlow: Flow[FSCommand, ByteString, _] =
     Flow.fromFunction { fsCommand =>
 
-      adapter.debug(s"Sending command to FS for FS for connection $connectionId : ${fsCommand.toString}")
+      //adapter.debug(s"Sending command to FS for FS for connection $connectionId : ${fsCommand.toString}")
       ByteString(fsCommand.toString)
     }
 
@@ -153,7 +152,7 @@ abstract class FSConnection {
             fsConnectionPromise.complete(
               Success(FSSocket(fsConnection, ChannelData(command.headers)))
             )
-            adapter.debug(s"Completing connect for $connectionId")
+            //adapter.debug(s"Completing connect for $connectionId")
             connectionId = command.headers(HeaderNames.uniqueId)
             hasConnected = true
             if (lingering) publishNonMappingCommand(LingerCommand)
@@ -176,7 +175,7 @@ abstract class FSConnection {
         case ::(command: CommandReply, _) =>
           if (command.success && command.replyText.getOrElse("") == "+OK will linger") {
             isLingering = true
-            adapter.debug(s"Completing linger for $connectionId")
+            //adapter.debug(s"Completing linger for $connectionId")
             fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command))
           } else {
             fsConnectionPromise.complete(
@@ -203,7 +202,7 @@ abstract class FSConnection {
           else if (containsCmdReply(fSData) && lingering && !isLingering && hasConnected) doLinger(fSData)
           else fSData
           //Send every message
-          adapter.debug(s"DSData flow for $connectionId:\n${fSData.fsMessages.mkString}")
+          //adapter.debug(s"DSData flow for $connectionId:\n${fSData.fsMessages.mkString}")
           updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f)))
       }
       .toMat(futureSink)(Keep.right)
@@ -258,7 +257,7 @@ abstract class FSConnection {
     * @return EventMessage
     */
   private def handleFSEventMessage(eventMessage: EventMessage)(implicit adapter: LoggingAdapter): EventMessage = {
-    adapter.debug(s"handleFSEventMessage $connectionId:\n${eventMessage.toString}")
+    //adapter.debug(s"handleFSEventMessage $connectionId:\n${eventMessage.toString}")
     eventMessage.applicationUuid.flatMap(eventMap.lift).foreach {
       commandToQueue =>
         if (eventMessage.eventName.contains(EventNames.ChannelExecute))
