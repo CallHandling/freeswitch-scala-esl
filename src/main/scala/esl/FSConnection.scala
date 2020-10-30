@@ -47,9 +47,11 @@ abstract class FSConnection extends LazyLogging {
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
 
 
-  private[this] var connectionId: String = UUID.randomUUID().toString
+  private[this] var connectionId: String = "pre-call-id: " + UUID.randomUUID().toString
 
   def getConnectionId: String = connectionId
+
+  def setConnectionId(connId:String): Unit = connectionId = connId
 
   /**
     * This queue maintain the promise of CommandReply for each respective FSCommand
@@ -62,7 +64,7 @@ abstract class FSConnection extends LazyLogging {
 
   protected[this] lazy val (queue, source) = Source
     .queue[FSCommand](50, OverflowStrategy.backpressure)
-    .logWithMarker(name = "esl-queue-stream", e => LogMarker(name = "esl-queue-stream", properties = Map("element" -> e, "connection" -> connectionId)))
+    .logWithMarker(name = "esl-freeswitch-out", e => LogMarker(name = "esl-freeswitch-out", properties = Map("element" -> e, "connection" -> connectionId)))
     .addAttributes(
       Attributes.logLevels(
         onElement = Attributes.LogLevels.Info,
@@ -80,10 +82,28 @@ abstract class FSConnection extends LazyLogging {
       var unParsedBuffer: String = ""
       data => {
         val fsPacket = data.utf8String
-        logger.debug(s"Connection Id: $getConnectionId : Unparsed data before FS Data: $unParsedBuffer, Received FS Data: $fsPacket")
         val (messages, buffer) = parser.parse(unParsedBuffer + fsPacket)
         unParsedBuffer = buffer
-        logger.debug(s"Connection Id: $getConnectionId : Unparsed data After FS Data parsing: $unParsedBuffer")
+        adapter.debug(
+          s"""ESL-CID: $getConnectionId
+             |BEFORE:
+             |---------------------------------------
+             |$unParsedBuffer
+             |---------------------------------------
+             |FS Data:
+             |---------------------------------------
+             |$fsPacket
+             |---------------------------------------
+             |
+             |
+             |AFTER:
+             |---------------------------------------
+             |$unParsedBuffer
+             |---------------------------------------
+             |Messages:
+             |---------------------------------------
+             |${messages.toString()}
+             |---------------------------------------""".stripMargin)
         List(FSData(self, messages))
       }
     })
@@ -142,7 +162,11 @@ abstract class FSConnection extends LazyLogging {
     lazy val futureSink = Sink.futureSink(
       Future
         .firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
-        .map(fsSocket => fun(Future.successful(fsSocket)))
+        .map(fsSocket => {
+          fsSocket.fsConnection.setConnectionId(fsSocket.channelData.headers.getOrElse(HeaderNames.uniqueId,
+            fsSocket.fsConnection.getConnectionId))
+          fun(Future.successful(fsSocket))
+         })
         .transform(_ match {
           case failure@Failure(ex) =>
             queue.complete()
@@ -154,12 +178,11 @@ abstract class FSConnection extends LazyLogging {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
           if (command.success) {
-            connectionId = command.headers.get(HeaderNames.uniqueId).getOrElse(connectionId)
             fsConnectionPromise.complete(
               Success(FSSocket(fsConnection, ChannelData(command.headers)))
             )
             if (lingering) publishNonMappingCommand(LingerCommand)
-            (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),true)
+            (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)), true)
           } else {
             fsConnectionPromise.complete(
               Failure(
@@ -177,7 +200,7 @@ abstract class FSConnection extends LazyLogging {
     lazy val doLinger = (fsData: FSData, isLingering:Boolean) => {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
-          logger.debug(s"Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}")
+          adapter.debug(s"Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}")
           if (command.success && command.replyText.getOrElse("") == "+OK will linger") {
             (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)), true)
           } else {
@@ -204,19 +227,29 @@ abstract class FSConnection extends LazyLogging {
           val ling = doLinger(fSData,isLingering)
           isLingering=ling._2
           ling._1
+        } else {
+          if (hasConnected && isLingering) {
+            val (messagesWithSameId, messagesWithDifferentId) = fSData.fsMessages.partition {
+              message =>
+                message.headers.get(HeaderNames.uniqueId).fold(true)(_ == getConnectionId)
+            }
+            if(messagesWithDifferentId.nonEmpty) {
+              adapter.warning(
+                s"""CALL-ID: ${connectionId} socket has received ${messagesWithDifferentId.length} message(s) from other call-ids
+                   |DROPPING:
+                   |${messagesWithDifferentId.toString()}
+                   |
+                   |RETAINING:
+                   |${messagesWithSameId.toString()}
+                   |""".stripMargin)
+            }
+            fSData.copy(fsMessages = messagesWithSameId)
+          } else fSData
         }
-        else fSData
         //Send every message
         List(updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f))))
       }
-    }).logWithMarker(name = "esl-main", e => LogMarker(name = "esl-main", properties = Map("element" -> e, "connection" -> fsConnection.getConnectionId)))
-      .addAttributes(
-        Attributes.logLevels(
-          onElement = Attributes.LogLevels.Info,
-          onFinish = Attributes.LogLevels.Info,
-          onFailure = Attributes.LogLevels.Error))
-      .toMat(futureSink)(Keep.right)
-
+    }).toMat(futureSink)(Keep.right)
   }
 
   /**

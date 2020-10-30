@@ -47,16 +47,16 @@ object OutboundTest extends App with LazyLogging {
                         /** This future will complete when FreeSwitch sends command/reply message to the socket.
                         It will be Success or Failure based on the response from FreeSwitch*/
                         commandResponse.commandReply
-                          .foreach(f => logger.info(s"Got command reply: ${f}"))
+                          .foreach(f => adapter.info(s"Got command reply: ${f}"))
 
                         /** This future will complete when FreeSwitch sends the CHANNEL_EXECUTE event to the socket */
                         commandResponse.executeEvent.foreach(f =>
-                          logger.info(s"Got ChannelExecute event: ${f}")
+                          adapter.info(s"Got ChannelExecute event: ${f}")
                         )
 
                         /** This future will complete when FreeSwitch sends the CHANNEL_EXECUTE_COMPLETE  event to the socket */
                         commandResponse.executeComplete.foreach(f =>
-                          logger
+                          adapter
                             .info(s"Got ChannelExecuteComplete event: ${f}")
                         )
                     }
@@ -65,7 +65,7 @@ object OutboundTest extends App with LazyLogging {
             /** You can push in a Sink of FSMessage to create a reactive pipeline for all the events coming down the socket */
             Sink.foreach[FSData] { fsData =>
               /**Here you have an access of fs connection along with fs messages*/
-              logger.info(s"Fs Messages: ${fsData.fsMessages}")
+              adapter.info(s"Fs Messages: ${fsData.fsMessages}")
             }
         }
 
@@ -74,7 +74,7 @@ object OutboundTest extends App with LazyLogging {
     })
     .onComplete {
       case Success(result) =>
-        logger.info(s"TCP Listener started successfully ${result}")
-      case Failure(ex) => logger.info(s"TCP Listener Failed to start ${ex}")
+        adapter.info(s"TCP Listener started successfully ${result}")
+      case Failure(ex) => adapter.info(s"TCP Listener Failed to start ${ex}")
     }
 }

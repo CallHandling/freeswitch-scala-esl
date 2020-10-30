@@ -18,7 +18,7 @@ package esl
 
 import akka.actor.ActorSystem
 import akka.event.{LogMarker, MarkerLoggingAdapter}
-import akka.stream.{Attributes, Materializer, NeverMaterializedException}
+import akka.stream.{Attributes, Materializer, NeverMaterializedException, OverflowStrategy}
 import akka.stream.scaladsl.Tcp.IncomingConnection
 import akka.stream.scaladsl.{BidiFlow, Framing, Sink, Source, Tcp}
 import akka.util.ByteString
@@ -27,7 +27,7 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import esl.FSConnection.{FSData, FSSocket}
 
-import scala.concurrent.duration.{Duration, FiniteDuration, SECONDS}
+import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration, SECONDS}
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -126,8 +126,8 @@ class OutboundServer(address: String, port: Int,
       ),
       onFsConnectionClosed: Future[IncomingConnection] => Unit
   ): Future[Done] = {
-    Tcp().bind(address, port, halfClose = true).runForeach { connection =>
-      logger
+    Tcp().bind(address, port, halfClose = true, backlog=1000).runForeach { connection =>
+      adapter
         .info(s"Socket connection is opened for ${connection.remoteAddress}")
       val fsConnection = OutboundFSConnection()
       fsConnection.connect().map { _ =>
@@ -140,16 +140,10 @@ class OutboundServer(address: String, port: Int,
         )
         val (source, protocol) = flow(fsConnection)
 
-        source.logWithMarker(name = "esl-source", e => LogMarker(name = "esl-source", properties = Map("element" -> e, "connection" -> fsConnection.getConnectionId)))
-          .addAttributes(
-            Attributes.logLevels(
-              onElement = Attributes.LogLevels.Info,
-              onFinish = Attributes.LogLevels.Info,
-              onFailure = Attributes.LogLevels.Error))
-
         val (_, closed: Future[Any]) = connection.flow
           .join(protocol)
-          .logWithMarker(name = "esl-connection", e => LogMarker(name = "esl-connection", properties = Map("element" -> e, "connection" -> fsConnection.getConnectionId)))
+          .buffer(1000, OverflowStrategy.fail)
+          .logWithMarker(name = "esl-freeswitch-in", e => LogMarker(name = "esl-freeswitch-in", properties = Map("element" -> e, "connection" -> fsConnection.getConnectionId)))
           .addAttributes(
             Attributes.logLevels(
               onElement = Attributes.LogLevels.Info,
@@ -159,17 +153,17 @@ class OutboundServer(address: String, port: Int,
 
         val closedConn = closed.transform {
           case Success(_) =>
-            logger.debug(
+            adapter.debug(
               s"Socket connection has been closed successfully for ${connection.remoteAddress}"
             )
             Success(connection)
           case Failure(ex: NeverMaterializedException) =>
-            logger.info(
+            adapter.info(
               s"Connection from ${connection.remoteAddress} cancelled as it was not FreeSwitch"
             )
             Failure(ex)
           case Failure(ex) =>
-            logger.debug(
+            adapter.debug(
               s"Socket connection failed to closed for ${connection.remoteAddress}"
             )
             Failure(ex)
