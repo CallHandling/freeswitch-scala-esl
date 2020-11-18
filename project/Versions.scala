@@ -15,7 +15,7 @@
  */
 
 object Versions {
-  val akkaStreamV = "2.6.8"
+  val akkaStreamV = "2.6.10"
   val scalaTestV = "3.0.1"
   val scalaCheckV = "1.13.4"
   val mockitoV = "1.10.19"

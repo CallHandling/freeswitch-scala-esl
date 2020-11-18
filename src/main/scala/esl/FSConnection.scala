@@ -30,7 +30,7 @@ import esl.domain.{ApplicationCommandConfig, FSMessage, _}
 import esl.parser.{DefaultParser, Parser}
 
 import scala.collection.mutable
-import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutException}
 import scala.util.{Failure, Success}
 import java.util.UUID
@@ -176,7 +176,7 @@ abstract class FSConnection extends LazyLogging {
     )
     lazy val connectToFS = (fsData: FSData, hasConnected:Boolean) => {
       fsData.fsMessages match {
-        case ::(command: CommandReply, _) =>
+        case ::(command: CommandReply, _) if (command.headers.contains(HeaderNames.uniqueId)) =>
           if (command.success) {
             fsConnectionPromise.complete(
               Success(FSSocket(fsConnection, ChannelData(command.headers)))
@@ -201,7 +201,7 @@ abstract class FSConnection extends LazyLogging {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
           adapter.debug(s"Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}")
-          if (command.success && command.replyText.getOrElse("") == "+OK will linger") {
+          if (command.success) {
             (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)), true)
           } else {
             (fsData, isLingering)
@@ -210,20 +210,24 @@ abstract class FSConnection extends LazyLogging {
       }
     }
 
-    val containsCmdReply = (fSData: FSData) => {
-      fSData.fsMessages.count(a => a.contentType == ContentTypes.commandReply) > 0
+    val getCmdReplies = (fSData: FSData) => {
+      fSData.fsMessages.filter(a => a.contentType == ContentTypes.commandReply)
     }
 
     Flow[FSData].statefulMapConcat( () => {
       var hasConnected: Boolean = false
       var isLingering: Boolean = false
       fSData => {
-        val updatedFSData = if (containsCmdReply(fSData) && !hasConnected) {
+        val cmdReplies = getCmdReplies(fSData)
+        val isConnect = cmdReplies.foldLeft(false)((_, b) => b.headers.contains(HeaderNames.uniqueId))
+        val updatedFSData = if (cmdReplies.nonEmpty && !hasConnected && isConnect) {
           val con = connectToFS(fSData,hasConnected)
           hasConnected=con._2
           con._1
         }
-        else if (containsCmdReply(fSData) && lingering && !isLingering && hasConnected) {
+        else if (cmdReplies.nonEmpty && lingering && !isLingering && !isConnect && cmdReplies.count {
+          case a: CommandReply => a.replyText.getOrElse("") == "+OK will linger"
+        } > 0) {
           val ling = doLinger(fSData,isLingering)
           isLingering=ling._2
           ling._1
