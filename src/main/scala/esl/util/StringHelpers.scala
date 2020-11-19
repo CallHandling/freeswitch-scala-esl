@@ -17,7 +17,7 @@ package esl.util
 
 object StringHelpers {
   def parseKeyValuePairs(string: String, delimiter: Char): Map[String, String] = {
-    string.split('\n').filter(p => p.length > 0).map { pair => {
+    string.split('\n').filter(p => p.length > 0 && p != "Content-Length: 0").map { pair => {
       val lst = pair.split(delimiter)
       (lst(0), lst(1).drop(1))
     }
