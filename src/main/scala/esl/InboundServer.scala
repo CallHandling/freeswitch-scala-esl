@@ -33,7 +33,7 @@ object InboundServer {
   private val port = "freeswitch.inbound.port"
   private val fsTimeout = "freeswitch.inbound.startup.timeout"
   private val linger = "freeswitch.outbound.linger"
-  private val defaultTimeout = Duration(1, SECONDS)
+  private val defaultTimeout = Duration(5, SECONDS)
 
   /**
     * Create a inbound client for a given configuration and parser

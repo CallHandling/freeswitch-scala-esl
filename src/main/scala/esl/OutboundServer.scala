@@ -36,7 +36,7 @@ object OutboundServer {
   private val port = "freeswitch.outbound.port"
   private val fsTimeout = "freeswitch.outbound.startup.timeout"
   private val linger = "freeswitch.outbound.linger"
-  private val defaultTimeout = Duration(1, SECONDS)
+  private val defaultTimeout = Duration(5, SECONDS)
 
   /**
     * Create a OutBound server with given configuration and parser
@@ -153,17 +153,17 @@ class OutboundServer(address: String, port: Int,
 
         val closedConn = closed.transform {
           case Success(_) =>
-            adapter.debug(
+            adapter.info(fsConnection.logMarker,
               s"Socket connection has been closed successfully for ${connection.remoteAddress}"
             )
             Success(connection)
           case Failure(ex: NeverMaterializedException) =>
-            adapter.info(
+            adapter.debug(fsConnection.logMarker,
               s"Connection from ${connection.remoteAddress} cancelled as it was not FreeSwitch"
             )
             Failure(ex)
           case Failure(ex) =>
-            adapter.debug(
+            adapter.warning(fsConnection.logMarker,
               s"Socket connection failed to closed for ${connection.remoteAddress}"
             )
             Failure(ex)

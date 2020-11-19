@@ -53,6 +53,8 @@ abstract class FSConnection extends LazyLogging {
 
   def setConnectionId(connId:String): Unit = connectionId = connId
 
+  def logMarker = LogMarker("hubbub-esl-fs", Map("CALL-ID" -> getConnectionId))
+
   /**
     * This queue maintain the promise of CommandReply for each respective FSCommand
     */
@@ -84,7 +86,7 @@ abstract class FSConnection extends LazyLogging {
         val fsPacket = data.utf8String
         val (messages, buffer) = parser.parse(unParsedBuffer + fsPacket)
         unParsedBuffer = buffer
-        adapter.debug(
+        adapter.info(logMarker,
           s"""ESL-CID: $getConnectionId
              |BEFORE:
              |---------------------------------------
@@ -200,7 +202,7 @@ abstract class FSConnection extends LazyLogging {
     lazy val doLinger = (fsData: FSData, isLingering:Boolean) => {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
-          adapter.debug(s"Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}")
+          adapter.info(logMarker, s"Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}")
           if (command.success) {
             (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)), true)
           } else {
@@ -238,7 +240,7 @@ abstract class FSConnection extends LazyLogging {
                 message.headers.get(HeaderNames.uniqueId).fold(true)(_ == getConnectionId)
             }
             if(messagesWithDifferentId.nonEmpty) {
-              adapter.warning(
+              adapter.warning(logMarker,
                 s"""CALL-ID: ${connectionId} socket has received ${messagesWithDifferentId.length} message(s) from other call-ids
                    |DROPPING:
                    |${messagesWithDifferentId.toString()}
