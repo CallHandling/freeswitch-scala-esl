@@ -126,7 +126,7 @@ class OutboundServer(address: String, port: Int,
       ),
       onFsConnectionClosed: Future[IncomingConnection] => Unit
   ): Future[Done] = {
-    Tcp().bind(address, port, halfClose = true, backlog=1000).runForeach { connection =>
+    Tcp().bind(address, port, halfClose = false, backlog=1000).runForeach { connection =>
       adapter
         .info(s"Socket connection is opened for ${connection.remoteAddress}")
       val fsConnection = OutboundFSConnection()
