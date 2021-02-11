@@ -18,7 +18,7 @@ package esl
 
 import akka.actor.ActorSystem
 import akka.event.{LogMarker, MarkerLoggingAdapter}
-import akka.stream.{Attributes, Materializer, NeverMaterializedException, OverflowStrategy}
+import akka.stream.{Attributes, KillSwitches, Materializer, NeverMaterializedException, OverflowStrategy}
 import akka.stream.scaladsl.Tcp.IncomingConnection
 import akka.stream.scaladsl.{BidiFlow, Framing, Sink, Source, Tcp}
 import akka.util.ByteString
@@ -37,7 +37,6 @@ object OutboundServer {
   private val fsTimeout = "freeswitch.outbound.startup.timeout"
   private val linger = "freeswitch.outbound.linger"
   private val defaultTimeout = Duration(5, SECONDS)
-
   /**
     * Create a OutBound server with given configuration and parser
     *
@@ -126,9 +125,10 @@ class OutboundServer(address: String, port: Int,
       ),
       onFsConnectionClosed: Future[IncomingConnection] => Unit
   ): Future[Done] = {
-    Tcp().bind(address, port, halfClose = false, backlog=1000).runForeach { connection =>
+    Tcp().bind(address, port, backlog = 1000, idleTimeout = 20 seconds).runForeach { connection =>
       adapter
         .info(s"Socket connection is opened for ${connection.remoteAddress}")
+
       val fsConnection = OutboundFSConnection()
       fsConnection.connect().map { _ =>
         lazy val sink = fsConnection.init(

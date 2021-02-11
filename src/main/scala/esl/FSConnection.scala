@@ -55,6 +55,9 @@ abstract class FSConnection extends LazyLogging {
 
   def logMarker = LogMarker("hubbub-esl-fs", Map("CALL-ID" -> getConnectionId))
 
+
+  private[this] val sharedKillSwitch = KillSwitches.shared("kill-" + getConnectionId)
+
   /**
     * This queue maintain the promise of CommandReply for each respective FSCommand
     */
@@ -66,6 +69,7 @@ abstract class FSConnection extends LazyLogging {
 
   protected[this] lazy val (queue, source) = Source
     .queue[FSCommand](50, OverflowStrategy.backpressure)
+    .via(sharedKillSwitch.flow)
     .logWithMarker(name = "esl-freeswitch-out", e => LogMarker(name = "esl-freeswitch-out", properties = Map("element" -> e, "connection" -> connectionId)))
     .addAttributes(
       Attributes.logLevels(
@@ -129,8 +133,8 @@ abstract class FSConnection extends LazyLogging {
       BidiFlow[ByteString, FSData, FSCommand, ByteString, NotUsed]
     ) = {
     (
-      Source.fromPublisher(source),
-      BidiFlow.fromFlows(upstreamFlow, downstreamFlow)
+      Source.fromPublisher(source).via(sharedKillSwitch.flow),
+      BidiFlow.fromFlows(upstreamFlow.via(sharedKillSwitch.flow), downstreamFlow.via(sharedKillSwitch.flow))
     )
   }
 
@@ -759,8 +763,10 @@ abstract class FSConnection extends LazyLogging {
     */
   def exit(
             config: ApplicationCommandConfig = ApplicationCommandConfig()
-          ): Future[CommandResponse] =
+          ): Future[CommandResponse] = {
+    sharedKillSwitch.shutdown()
     publishCommand(Exit(config))
+  }
 }
 
 object FSConnection {
