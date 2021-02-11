@@ -175,6 +175,7 @@ abstract class FSConnection extends LazyLogging {
          })
         .transform(_ match {
           case failure@Failure(ex) =>
+            sharedKillSwitch.shutdown()
             queue.complete()
             failure
           case success => success
@@ -255,6 +256,9 @@ abstract class FSConnection extends LazyLogging {
             }
             fSData.copy(fsMessages = messagesWithSameId)
           } else fSData
+        }
+        if(fSData.fsMessages.count(m => m.contentType == ContentTypes.disconnectNotice) > 0){
+          sharedKillSwitch.shutdown()
         }
         //Send every message
         List(updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f))))
@@ -764,7 +768,6 @@ abstract class FSConnection extends LazyLogging {
   def exit(
             config: ApplicationCommandConfig = ApplicationCommandConfig()
           ): Future[CommandResponse] = {
-    sharedKillSwitch.shutdown()
     publishCommand(Exit(config))
   }
 }
