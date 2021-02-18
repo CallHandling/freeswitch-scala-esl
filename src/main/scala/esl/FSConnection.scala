@@ -34,11 +34,10 @@ import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutException}
 import scala.util.{Failure, Success}
 import java.util.UUID
-
 import akka.event.{LogMarker, MarkerLoggingAdapter}
-import com.typesafe.scalalogging.LazyLogging
+import com.typesafe.scalalogging.StrictLogging
 
-abstract class FSConnection extends LazyLogging {
+abstract class FSConnection extends StrictLogging {
   self =>
   lazy private[this] val parser: Parser = DefaultParser
   implicit protected val system: ActorSystem
@@ -68,7 +67,7 @@ abstract class FSConnection extends LazyLogging {
     mutable.Map.empty
 
   protected[this] lazy val (queue, source) = Source
-    .queue[FSCommand](50, OverflowStrategy.backpressure)
+    .queue[FSCommand](50, OverflowStrategy.fail)
     .via(sharedKillSwitch.flow)
     .logWithMarker(name = "esl-freeswitch-out", e => LogMarker(name = "esl-freeswitch-out", properties = Map("element" -> e, "connection" -> connectionId)))
     .addAttributes(
@@ -90,26 +89,6 @@ abstract class FSConnection extends LazyLogging {
         val fsPacket = data.utf8String
         val (messages, buffer) = parser.parse(unParsedBuffer + fsPacket)
         unParsedBuffer = buffer
-        adapter.info(logMarker,
-          s"""ESL-CID: $getConnectionId
-             |BEFORE:
-             |---------------------------------------
-             |$unParsedBuffer
-             |---------------------------------------
-             |FS Data:
-             |---------------------------------------
-             |$fsPacket
-             |---------------------------------------
-             |
-             |
-             |AFTER:
-             |---------------------------------------
-             |$unParsedBuffer
-             |---------------------------------------
-             |Messages:
-             |---------------------------------------
-             |${messages.toString()}
-             |---------------------------------------""".stripMargin)
         List(FSData(self, messages))
       }
     })
@@ -246,13 +225,7 @@ abstract class FSConnection extends LazyLogging {
             }
             if(messagesWithDifferentId.nonEmpty) {
               adapter.warning(logMarker,
-                s"""CALL-ID: ${connectionId} socket has received ${messagesWithDifferentId.length} message(s) from other call-ids
-                   |DROPPING:
-                   |${messagesWithDifferentId.toString()}
-                   |
-                   |RETAINING:
-                   |${messagesWithSameId.toString()}
-                   |""".stripMargin)
+                s"""CALL-ID: ${connectionId} socket has received ${messagesWithDifferentId.length} message(s) from other call-ids""")
             }
             fSData.copy(fsMessages = messagesWithSameId)
           } else fSData
