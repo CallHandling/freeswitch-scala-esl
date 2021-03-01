@@ -230,9 +230,6 @@ abstract class FSConnection extends StrictLogging {
             fSData.copy(fsMessages = messagesWithSameId)
           } else fSData
         }
-        if(fSData.fsMessages.count(m => m.contentType == ContentTypes.disconnectNotice) > 0){
-          sharedKillSwitch.shutdown()
-        }
         //Send every message
         List(updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f))))
       }
@@ -743,6 +740,8 @@ abstract class FSConnection extends StrictLogging {
           ): Future[CommandResponse] = {
     publishCommand(Exit(config))
   }
+
+  def kill = sharedKillSwitch.shutdown()
 }
 
 object FSConnection {
