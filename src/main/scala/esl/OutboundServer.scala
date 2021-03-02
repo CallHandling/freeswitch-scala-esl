@@ -18,7 +18,7 @@ package esl
 
 import akka.actor.ActorSystem
 import akka.event.{LogMarker, MarkerLoggingAdapter}
-import akka.stream.{Attributes, KillSwitches, Materializer, NeverMaterializedException, OverflowStrategy}
+import akka.stream.{ActorAttributes, Attributes, KillSwitches, Materializer, NeverMaterializedException, OverflowStrategy, Supervision}
 import akka.stream.scaladsl.Tcp.IncomingConnection
 import akka.stream.scaladsl.{BidiFlow, Framing, Sink, Source, Tcp}
 import akka.util.ByteString
@@ -140,6 +140,17 @@ class OutboundServer(address: String, port: Int,
         )
         val (source, protocol) = flow(fsConnection)
 
+        val decider: Supervision.Decider = {
+          case _: NullPointerException => {
+            adapter.error(fsConnection.logMarker, "NullPointerException in Supervisor Resume")
+            Supervision.Resume
+          }
+          case ex => {
+            adapter.error(fsConnection.logMarker, ex, "Exception in Supervisor Stop")
+            Supervision.Stop
+          }
+        }
+
         val (_, closed: Future[Any]) = connection.flow
           .join(protocol)
           .buffer(1000, OverflowStrategy.fail)
@@ -149,6 +160,7 @@ class OutboundServer(address: String, port: Int,
               onElement = Attributes.LogLevels.Info,
               onFinish = Attributes.LogLevels.Info,
               onFailure = Attributes.LogLevels.Error))
+          .addAttributes(ActorAttributes.supervisionStrategy(decider))
           .runWith(source, sink)
 
         val closedConn = closed.transform {

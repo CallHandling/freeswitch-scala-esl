@@ -66,6 +66,17 @@ abstract class FSConnection extends StrictLogging {
   private[this] val eventMap: mutable.Map[String, CommandToQueue] =
     mutable.Map.empty
 
+  private[this] val decider: Supervision.Decider = {
+    case _: NullPointerException => {
+      adapter.error(logMarker, "NullPointerException in Supervisor Resume")
+      Supervision.Resume
+    }
+    case ex => {
+      adapter.error(logMarker, ex, "Exception in Supervisor Stop")
+      Supervision.Stop
+    }
+  }
+
   protected[this] lazy val (queue, source) = Source
     .queue[FSCommand](50, OverflowStrategy.fail)
     .via(sharedKillSwitch.flow)
@@ -75,6 +86,7 @@ abstract class FSConnection extends StrictLogging {
         onElement = Attributes.LogLevels.Info,
         onFinish = Attributes.LogLevels.Info,
         onFailure = Attributes.LogLevels.Error))
+    .addAttributes(ActorAttributes.supervisionStrategy(decider))
     .toMat(Sink.asPublisher(false))(Keep.both)
     .run()
 
@@ -154,6 +166,7 @@ abstract class FSConnection extends StrictLogging {
          })
         .transform(_ match {
           case failure@Failure(ex) =>
+            adapter.error(logMarker, ex, "About to shutdown due to exception in Future sink")
             sharedKillSwitch.shutdown()
             queue.complete()
             failure
@@ -170,6 +183,7 @@ abstract class FSConnection extends StrictLogging {
             if (lingering) publishNonMappingCommand(LingerCommand)
             (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)), true)
           } else {
+            adapter.error(logMarker, s"Socket failed to make connection with an error: ${command.errorMessage}")
             fsConnectionPromise.complete(
               Failure(
                 new Exception(
