@@ -45,8 +45,13 @@ abstract class FSConnection extends StrictLogging {
   implicit protected val adapter: MarkerLoggingAdapter
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
 
+  private[this] var originatedCallIds: mutable.Set[String] = mutable.Set.empty[String]
 
   private[this] var connectionId: String = "pre-call-id: " + UUID.randomUUID().toString
+
+  def getOriginatedCallIds: mutable.Set[String] = originatedCallIds
+
+  def setOriginatedCallIds(uuid:String): Unit = originatedCallIds.add(uuid)
 
   def getConnectionId: String = connectionId
 
@@ -235,7 +240,7 @@ abstract class FSConnection extends StrictLogging {
           if (hasConnected && isLingering) {
             val (messagesWithSameId, messagesWithDifferentId) = fSData.fsMessages.partition {
               message =>
-                message.headers.get(HeaderNames.uniqueId).fold(true)(_ == getConnectionId)
+                message.headers.get(HeaderNames.uniqueId).fold(true)(x => x == getConnectionId || getOriginatedCallIds.contains(x))
             }
             if(messagesWithDifferentId.nonEmpty) {
               adapter.warning(logMarker,
@@ -457,8 +462,12 @@ abstract class FSConnection extends StrictLogging {
   def filterUUId(
                   uuid: String,
                   config: ApplicationCommandConfig = ApplicationCommandConfig()
-                ): Future[CommandResponse] =
+                ): Future[CommandResponse] = {
+    setOriginatedCallIds(uuid)
     publishCommand(FilterUUId(uuid, config))
+  }
+
+
 
   /**
     * filter delete
