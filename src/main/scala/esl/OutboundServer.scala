@@ -26,6 +26,7 @@ import akka.{Done, NotUsed}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
 import esl.FSConnection.{FSData, FSSocket}
+import scala.language.postfixOps
 
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration, SECONDS}
 import scala.concurrent.{Future, Promise}
@@ -153,6 +154,12 @@ class OutboundServer(address: String, port: Int,
 
         val (_, closed: Future[Any]) = connection.flow
           .join(protocol)
+          .recover {
+            case e => {
+              adapter.error(fsConnection.logMarker, e.getMessage, e)
+              throw e
+            }
+          }
           .buffer(1000, OverflowStrategy.fail)
           .logWithMarker(name = "esl-freeswitch-in", e => LogMarker(name = "esl-freeswitch-in", properties = Map("element" -> e, "connection" -> fsConnection.getConnectionId)))
           .addAttributes(

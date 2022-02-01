@@ -67,7 +67,9 @@ lazy val commonSettings = Seq(
   )
 )
 
-
+scalacOptions ++= Seq(
+  "-Xcheckinit", "-feature"
+)
 
 lazy val root = (project in file("."))
   .settings(commonSettings)

@@ -86,6 +86,12 @@ abstract class FSConnection extends StrictLogging {
     .queue[FSCommand](50, OverflowStrategy.fail)
     .via(sharedKillSwitch.flow)
     .logWithMarker(name = "esl-freeswitch-out", e => LogMarker(name = "esl-freeswitch-out", properties = Map("element" -> e, "connection" -> connectionId)))
+    .recover {
+      case e => {
+        adapter.error(logMarker, e.getMessage, e)
+        throw e
+      }
+    }
     .addAttributes(
       Attributes.logLevels(
         onElement = Attributes.LogLevels.Info,
@@ -100,13 +106,22 @@ abstract class FSConnection extends StrictLogging {
     * will append to the next received packets. So we will get the complete parsed packet.
     */
   private[this] val upstreamFlow: Flow[ByteString, FSData, _] =
-    Flow[ByteString].statefulMapConcat(() => {
+    Flow[ByteString]
+      .addAttributes(ActorAttributes.supervisionStrategy(decider))
+      .statefulMapConcat(() => {
       var unParsedBuffer: String = ""
       data => {
-        val fsPacket = data.utf8String
-        val (messages, buffer) = parser.parse(unParsedBuffer + fsPacket)
-        unParsedBuffer = buffer
-        List(FSData(self, messages))
+        try {
+          val fsPacket = data.utf8String
+          val (messages, buffer) = parser.parse(unParsedBuffer + fsPacket)
+          unParsedBuffer = buffer
+          List(FSData(self, messages))
+        } catch {
+          case e: Exception => {
+            adapter.error(logMarker, e.getMessage, e)
+            List(FSData(self, List(NoneMessage())))
+          }
+        }
       }
     })
 
@@ -115,8 +130,16 @@ abstract class FSConnection extends StrictLogging {
     */
   private[this] val downstreamFlow: Flow[FSCommand, ByteString, _] =
     Flow.fromFunction { fsCommand =>
-      ByteString(fsCommand.toString)
+      val str =
+        try { fsCommand.toString }
+        catch {
+          case e: Throwable =>
+            adapter.error(logMarker, e, "Could not convert FSCommand to string")
+            "none"
+        }
+      ByteString(str)
     }
+
 
   /**
     * handler() function will create pipeline for source and flow
@@ -129,8 +152,18 @@ abstract class FSConnection extends StrictLogging {
       BidiFlow[ByteString, FSData, FSCommand, ByteString, NotUsed]
     ) = {
     (
-      Source.fromPublisher(source).via(sharedKillSwitch.flow),
-      BidiFlow.fromFlows(upstreamFlow.via(sharedKillSwitch.flow), downstreamFlow.via(sharedKillSwitch.flow))
+      Source.fromPublisher(source)
+        .addAttributes(ActorAttributes.supervisionStrategy(decider))
+        .via(sharedKillSwitch.flow),
+      BidiFlow.fromFlows(
+        upstreamFlow
+          .addAttributes(ActorAttributes.supervisionStrategy(decider))
+          .via(sharedKillSwitch.flow)
+        ,
+        downstreamFlow
+          .addAttributes(ActorAttributes.supervisionStrategy(decider))
+          .via(sharedKillSwitch.flow)
+      )
     )
   }
 
@@ -252,7 +285,7 @@ abstract class FSConnection extends StrictLogging {
         //Send every message
         List(updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f))))
       }
-    }).toMat(futureSink)(Keep.right)
+    }).addAttributes(ActorAttributes.supervisionStrategy(decider)).toMat(futureSink)(Keep.right)
   }
 
   /**

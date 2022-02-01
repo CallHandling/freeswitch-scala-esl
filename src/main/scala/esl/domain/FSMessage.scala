@@ -27,6 +27,13 @@ trait FSMessage extends FSBridgeCommand {
   val contentLength: Int
 }
 
+case class NoneMessage() extends FSMessage {
+  override val body: Option[String] = None
+  override val headers: Map[String, String] = Map[String, String]()
+  override val contentLength: Int = 0
+  override val contentType: String = "none"
+}
+
 case class BasicMessage(headers: Map[String, String], body: Option[String]) extends FSMessage {
   lazy val contentType: String = headers.lift(HeaderNames.contentType).fold("")(identity)
   lazy val contentLength: Int = headers.lift(HeaderNames.contentLength).fold(0)(_.toInt)
