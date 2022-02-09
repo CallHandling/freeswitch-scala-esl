@@ -33,6 +33,7 @@ object InboundServer {
   private val port = "freeswitch.inbound.port"
   private val fsTimeout = "freeswitch.inbound.startup.timeout"
   private val linger = "freeswitch.outbound.linger"
+  private val debugLogs = "freeswitch.logs.debug"
   private val defaultTimeout = Duration(5, SECONDS)
 
   /**
@@ -43,8 +44,11 @@ object InboundServer {
     * @param materializer : Materializer
     * @return OutboundServer
     */
-  def apply(config: Config)
-           (implicit system: ActorSystem, materializer: Materializer, adapter: MarkerLoggingAdapter): InboundServer =
+  def apply(config: Config)(implicit
+      system: ActorSystem,
+      materializer: Materializer,
+      adapter: MarkerLoggingAdapter
+  ): InboundServer =
     new InboundServer(config)
 
   /**
@@ -56,22 +60,48 @@ object InboundServer {
     * @param materializer : Materializer
     * @return OutboundServer
     */
-  def apply(interface: String, port: Int, timeout: FiniteDuration = defaultTimeout,linger: Boolean = true)
-           (implicit system: ActorSystem, materializer: Materializer, adapter: MarkerLoggingAdapter): InboundServer =
-    new InboundServer(interface, port, timeout, linger)
+  def apply(
+      interface: String,
+      port: Int,
+      timeout: FiniteDuration = defaultTimeout,
+      linger: Boolean = true,
+      enableDebugLogs: Boolean = false
+  )(implicit
+      system: ActorSystem,
+      materializer: Materializer,
+      adapter: MarkerLoggingAdapter
+  ): InboundServer =
+    new InboundServer(interface, port, timeout, linger, enableDebugLogs)
 
 }
 
-class InboundServer(interface: String, port: Int, timeout: FiniteDuration, linger:Boolean)
-                   (implicit system: ActorSystem, materializer: Materializer, adapter: MarkerLoggingAdapter) {
+class InboundServer(
+    interface: String,
+    port: Int,
+    timeout: FiniteDuration,
+    linger: Boolean,
+    enableDebugLogs: Boolean
+)(implicit
+    system: ActorSystem,
+    materializer: Materializer,
+    adapter: MarkerLoggingAdapter
+) {
   implicit private val ec = system.dispatcher
 
-  def this(config: Config)
-          (implicit system: ActorSystem, materializer: Materializer, adapter: MarkerLoggingAdapter) =
-    this(config.getString(InboundServer.address),
+  def this(config: Config)(implicit
+      system: ActorSystem,
+      materializer: Materializer,
+      adapter: MarkerLoggingAdapter
+  ) =
+    this(
+      config.getString(InboundServer.address),
       config.getInt(InboundServer.port),
       Duration(config.getDuration(InboundServer.fsTimeout).getSeconds, SECONDS),
-      config.getBoolean(InboundServer.linger))
+      config.getBoolean(InboundServer.linger),
+      config.hasPath(InboundServer.debugLogs) && config.getBoolean(
+        InboundServer.debugLogs
+      )
+    )
 
   /**
     * Open a client connection for given interface and port
@@ -82,15 +112,20 @@ class InboundServer(interface: String, port: Int, timeout: FiniteDuration, linge
     * @tparam T2 element publish to downstream
     * @return
     */
-  private[this] def client[T1, T2, Mat1, Mat2](sink: Sink[T1, Mat1],
-                                   flow: (Source[T2, Mat2], BidiFlow[ByteString, T1, T2, ByteString, NotUsed])) = {
+  private[this] def client[T1, T2, Mat1, Mat2](
+      sink: Sink[T1, Mat1],
+      flow: (
+          Source[T2, Mat2],
+          BidiFlow[ByteString, T1, T2, ByteString, NotUsed]
+      )
+  ) = {
     val clientFlow = Tcp().outgoingConnection(interface, port)
     val (source, protocol) = flow
-    val flowWithProtocol: Flow[T2, T1, Future[Tcp.OutgoingConnection]] = clientFlow
-      .join(protocol)
-      flowWithProtocol.runWith(source, sink)
+    val flowWithProtocol: Flow[T2, T1, Future[Tcp.OutgoingConnection]] =
+      clientFlow
+        .join(protocol)
+    flowWithProtocol.runWith(source, sink)
   }
-
 
   /**
     * The connect() function will authenticate client with freeswitch using given password. If freeswitch is not respond within given time then connection will timeout.
@@ -99,13 +134,20 @@ class InboundServer(interface: String, port: Int, timeout: FiniteDuration, linge
     * @param fun      function will get freeswitch outbound connection after injecting sink
     * @return Future[(Any, Any)]
     */
-  def connect[Mat](password: String)(fun: Future[FSSocket[InboundFSConnection]] => Sink[FSData, Mat]): Future[(NotUsed, Future[Any])] = {
-    val fsConnection = InboundFSConnection()
+  def connect[Mat](password: String)(
+      fun: Future[FSSocket[InboundFSConnection]] => Sink[FSData, Mat]
+  ): Future[(NotUsed, Future[Any])] = {
+    val fsConnection = InboundFSConnection(enableDebugLogs)
     fsConnection.connect(password).map { _ =>
-      val sink = fsConnection.init(Promise[FSSocket[InboundFSConnection]](), fsConnection, fun, timeout, linger)
+      val sink = fsConnection.init(
+        Promise[FSSocket[InboundFSConnection]](),
+        fsConnection,
+        fun,
+        timeout,
+        linger
+      )
       client(sink, fsConnection.handler())
     }
   }
-
 
 }

@@ -20,9 +20,10 @@ object OutboundTest extends App with LazyLogging {
   implicit val system = ActorSystem("esl-test")
   implicit val actorMaterializer = Materializer(system)
   implicit val ec = system.dispatcher
-  implicit val adapter: MarkerLoggingAdapter = Logging.withMarker(system, "hubbub-esl-fs")
+  implicit val adapter: MarkerLoggingAdapter =
+    Logging.withMarker(system, "hubbub-esl-fs")
 
-  OutboundServer("127.0.0.1", 8084)
+  OutboundServer("127.0.0.1", 8084, enableDebugLogs = true)
     .startWith(fsSocket => {
 
       /** For each outbound connection from freeswitch you will get a future named here 'fsSocket' this future will complete when we get a response from freeswitch to a connect command that is sent automatically by the library */
@@ -47,7 +48,9 @@ object OutboundTest extends App with LazyLogging {
                         /** This future will complete when FreeSwitch sends command/reply message to the socket.
                         It will be Success or Failure based on the response from FreeSwitch*/
                         commandResponse.commandReply
-                          .foreach(f => adapter.info(s"Got command reply: ${f}"))
+                          .foreach(f =>
+                            adapter.info(s"Got command reply: ${f}")
+                          )
 
                         /** This future will complete when FreeSwitch sends the CHANNEL_EXECUTE event to the socket */
                         commandResponse.executeEvent.foreach(f =>

@@ -50,6 +50,7 @@ object OutboundServer {
   private val port = "freeswitch.outbound.port"
   private val fsTimeout = "freeswitch.outbound.startup.timeout"
   private val linger = "freeswitch.outbound.linger"
+  private val debugLogs = "freeswitch.logs.debug"
   private val defaultTimeout = Duration(5, SECONDS)
 
   /**
@@ -80,13 +81,14 @@ object OutboundServer {
       interface: String,
       port: Int,
       timeout: FiniteDuration = defaultTimeout,
-      linger: Boolean = true
+      linger: Boolean = true,
+      enableDebugLogs: Boolean = false
   )(implicit
       system: ActorSystem,
       materializer: Materializer,
       adapter: MarkerLoggingAdapter
   ): OutboundServer =
-    new OutboundServer(interface, port, timeout, linger)
+    new OutboundServer(interface, port, timeout, linger, enableDebugLogs)
 
 }
 
@@ -95,7 +97,7 @@ class OutboundServer(
     port: Int,
     timeout: FiniteDuration,
     linger: Boolean,
-    enableDebugLogs: Boolean = false
+    enableDebugLogs: Boolean
 )(implicit
     system: ActorSystem,
     materializer: Materializer,
@@ -117,7 +119,10 @@ class OutboundServer(
         config.getDuration(OutboundServer.fsTimeout).getSeconds,
         SECONDS
       ),
-      config.getBoolean(OutboundServer.linger)
+      config.getBoolean(OutboundServer.linger),
+      config.hasPath(OutboundServer.debugLogs) && config.getBoolean(
+        OutboundServer.debugLogs
+      )
     )
 
   /** This function will start a tcp server with given Sink. any free switch messages materialize to given sink.
@@ -156,7 +161,7 @@ class OutboundServer(
         adapter
           .info(s"Socket connection is opened for ${connection.remoteAddress}")
 
-        val fsConnection = OutboundFSConnection()
+        val fsConnection = OutboundFSConnection(enableDebugLogs)
         fsConnection.connect().map { _ =>
           lazy val sink = fsConnection.init(
             Promise[FSSocket[OutboundFSConnection]](),
