@@ -23,16 +23,21 @@ import esl.domain.CallCommands._
 
 import scala.concurrent.Future
 
-case class OutboundFSConnection()(implicit actorSystem: ActorSystem, actorMaterializer: Materializer, adapterIn:MarkerLoggingAdapter)
-  extends FSConnection {
+case class OutboundFSConnection(enableDebugLogs: Boolean = false)(implicit
+    actorSystem: ActorSystem,
+    actorMaterializer: Materializer,
+    adapterIn: MarkerLoggingAdapter
+) extends FSConnection {
 
   override implicit val system: ActorSystem = actorSystem
   override implicit val materializer: Materializer = actorMaterializer
   override implicit val adapter: MarkerLoggingAdapter = adapterIn
+
   /**
     * Connect with freeswitch by sending `connect` command
     *
     * @return Future[CommandResponse]
     */
-  private[esl] def connect(): Future[QueueOfferResult] = publishNonMappingCommand(ConnectCommand)
+  private[esl] def connect(): Future[QueueOfferResult] =
+    publishNonMappingCommand(ConnectCommand)
 }

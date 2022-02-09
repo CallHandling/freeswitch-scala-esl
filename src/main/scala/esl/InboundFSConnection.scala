@@ -25,8 +25,11 @@ import esl.domain.CallCommands.AuthCommand
 
 import scala.concurrent.Future
 
-case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMaterializer: Materializer, adapterIn: MarkerLoggingAdapter)
-  extends FSConnection {
+case class InboundFSConnection(enableDebugLogs: Boolean = false)(implicit
+    actorSystem: ActorSystem,
+    actorMaterializer: Materializer,
+    adapterIn: MarkerLoggingAdapter
+) extends FSConnection {
   override implicit val materializer: Materializer = actorMaterializer
   override implicit val system: ActorSystem = actorSystem
   override implicit val adapter: MarkerLoggingAdapter = adapterIn
@@ -37,7 +40,11 @@ case class InboundFSConnection()(implicit actorSystem: ActorSystem, actorMateria
     * @param password : String
     * @return Future[CommandResponse]
     */
-  private[esl] def connect(password: String): Future[QueueOfferResult] = publishNonMappingCommand(AuthCommand(password))
+  private[esl] def connect(password: String): Future[QueueOfferResult] =
+    publishNonMappingCommand(AuthCommand(password))
 
-  override def play(fileName: String, config: ApplicationCommandConfig): Future[CommandResponse] = super.play(fileName, config)
+  override def play(
+      fileName: String,
+      config: ApplicationCommandConfig
+  ): Future[CommandResponse] = super.play(fileName, config)
 }

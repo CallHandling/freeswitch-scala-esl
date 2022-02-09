@@ -31,8 +31,13 @@ import esl.parser.{DefaultParser, Parser}
 
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
-import scala.concurrent.{ExecutionContextExecutor, Future, Promise, TimeoutException}
-import scala.util.{Failure, Success}
+import scala.concurrent.{
+  ExecutionContextExecutor,
+  Future,
+  Promise,
+  TimeoutException
+}
+import scala.util.{Failure, Success, Try}
 import java.util.UUID
 import akka.event.{LogMarker, MarkerLoggingAdapter}
 import com.typesafe.scalalogging.StrictLogging
@@ -45,22 +50,36 @@ abstract class FSConnection extends StrictLogging {
   implicit protected val adapter: MarkerLoggingAdapter
   lazy implicit protected val ec: ExecutionContextExecutor = system.dispatcher
 
-  private[this] var originatedCallIds: mutable.Set[String] = mutable.Set.empty[String]
+  private[this] var originatedCallIds: mutable.Set[String] =
+    mutable.Set.empty[String]
 
-  private[this] var connectionId: String = "pre-call-id: " + UUID.randomUUID().toString
+  def enableDebugLogs: Boolean
+
+  private[this] var connectionId: String =
+    "pre-call-id: " + UUID.randomUUID().toString
 
   def getOriginatedCallIds: mutable.Set[String] = originatedCallIds
 
-  def setOriginatedCallIds(uuid:String): Unit = originatedCallIds.add(uuid)
+  def setOriginatedCallIds(uuid: String): Unit = originatedCallIds.add(uuid)
 
   def getConnectionId: String = connectionId
 
-  def setConnectionId(connId:String): Unit = connectionId = connId
+  def setConnectionId(connId: String): Unit = connectionId = connId
+
+  private var onCommandCallbacks
+      : Seq[PartialFunction[FSCommandPublication, Unit]] =
+    Seq.empty
+
+  def onSendCommand(
+      partialFunction: PartialFunction[FSCommandPublication, Unit]
+  ): Unit = {
+    onCommandCallbacks = onCommandCallbacks :+ partialFunction
+  }
 
   def logMarker = LogMarker("hubbub-esl-fs", Map("CALL-ID" -> getConnectionId))
 
-
-  private[this] val sharedKillSwitch = KillSwitches.shared("kill-" + getConnectionId)
+  private[this] val sharedKillSwitch =
+    KillSwitches.shared("kill-" + getConnectionId)
 
   /**
     * This queue maintain the promise of CommandReply for each respective FSCommand
@@ -82,24 +101,40 @@ abstract class FSConnection extends StrictLogging {
     }
   }
 
-  protected[this] lazy val (queue, source) = Source
-    .queue[FSCommand](50, OverflowStrategy.fail)
-    .via(sharedKillSwitch.flow)
-    .logWithMarker(name = "esl-freeswitch-out", e => LogMarker(name = "esl-freeswitch-out", properties = Map("element" -> e, "connection" -> connectionId)))
-    .recover {
-      case e => {
-        adapter.error(logMarker, e.getMessage, e)
-        throw e
+  protected[this] lazy val (queue, source) = {
+    val sourceStage1 = Source
+      .queue[FSCommand](50, OverflowStrategy.fail)
+      .via(sharedKillSwitch.flow);
+
+    {
+      if (enableDebugLogs) {
+        sourceStage1
+          .logWithMarker(
+            name = "esl-freeswitch-out",
+            e =>
+              LogMarker(
+                name = "esl-freeswitch-out",
+                properties = Map("element" -> e, "connection" -> connectionId)
+              )
+          )
+          .addAttributes(
+            Attributes.logLevels(
+              onElement = Attributes.LogLevels.Info,
+              onFinish = Attributes.LogLevels.Info,
+              onFailure = Attributes.LogLevels.Error
+            )
+          )
+      } else sourceStage1
+    }.recover {
+        case e => {
+          adapter.error(logMarker, e.getMessage, e)
+          throw e
+        }
       }
-    }
-    .addAttributes(
-      Attributes.logLevels(
-        onElement = Attributes.LogLevels.Info,
-        onFinish = Attributes.LogLevels.Info,
-        onFailure = Attributes.LogLevels.Error))
-    .addAttributes(ActorAttributes.supervisionStrategy(decider))
-    .toMat(Sink.asPublisher(false))(Keep.both)
-    .run()
+      .addAttributes(ActorAttributes.supervisionStrategy(decider))
+      .toMat(Sink.asPublisher(false))(Keep.both)
+      .run()
+  }
 
   /**
     * It will parsed incoming packet into free switch messages. If there is an unparsed packet from last received packets,
@@ -109,21 +144,21 @@ abstract class FSConnection extends StrictLogging {
     Flow[ByteString]
       .addAttributes(ActorAttributes.supervisionStrategy(decider))
       .statefulMapConcat(() => {
-      var unParsedBuffer: String = ""
-      data => {
-        try {
-          val fsPacket = data.utf8String
-          val (messages, buffer) = parser.parse(unParsedBuffer + fsPacket)
-          unParsedBuffer = buffer
-          List(FSData(self, messages))
-        } catch {
-          case e: Exception => {
-            adapter.error(logMarker, e.getMessage, e)
-            List(FSData(self, List(NoneMessage())))
+        var unParsedBuffer: String = ""
+        data => {
+          try {
+            val fsPacket = data.utf8String
+            val (messages, buffer) = parser.parse(unParsedBuffer + fsPacket)
+            unParsedBuffer = buffer
+            List(FSData(self, messages))
+          } catch {
+            case e: Exception => {
+              adapter.error(logMarker, e.getMessage, e)
+              List(FSData(self, List(NoneMessage())))
+            }
           }
         }
-      }
-    })
+      })
 
   /**
     * It will convert the FS command into ByteString
@@ -140,7 +175,6 @@ abstract class FSConnection extends StrictLogging {
       ByteString(str)
     }
 
-
   /**
     * handler() function will create pipeline for source and flow
     *
@@ -148,18 +182,18 @@ abstract class FSConnection extends StrictLogging {
     *         tuple of source and flow
     */
   def handler(): (
-    Source[FSCommand, NotUsed],
+      Source[FSCommand, NotUsed],
       BidiFlow[ByteString, FSData, FSCommand, ByteString, NotUsed]
-    ) = {
+  ) = {
     (
-      Source.fromPublisher(source)
+      Source
+        .fromPublisher(source)
         .addAttributes(ActorAttributes.supervisionStrategy(decider))
         .via(sharedKillSwitch.flow),
       BidiFlow.fromFlows(
         upstreamFlow
           .addAttributes(ActorAttributes.supervisionStrategy(decider))
-          .via(sharedKillSwitch.flow)
-        ,
+          .via(sharedKillSwitch.flow),
         downstreamFlow
           .addAttributes(ActorAttributes.supervisionStrategy(decider))
           .via(sharedKillSwitch.flow)
@@ -179,12 +213,12 @@ abstract class FSConnection extends StrictLogging {
     * @return Sink[List[T], NotUsed]
     */
   def init[FS <: FSConnection, Mat](
-                                     fsConnectionPromise: Promise[FSSocket[FS]],
-                                     fsConnection: FS,
-                                     fun: Future[FSSocket[FS]] => Sink[FSData, Mat],
-                                     timeout: FiniteDuration,
-                                     lingering: Boolean
-                                   ) = {
+      fsConnectionPromise: Promise[FSSocket[FS]],
+      fsConnection: FS,
+      fun: Future[FSSocket[FS]] => Sink[FSData, Mat],
+      timeout: FiniteDuration,
+      lingering: Boolean
+  ) = {
     lazy val timeoutFuture =
       after(duration = timeout, using = system.scheduler) {
         Future.failed(
@@ -198,30 +232,46 @@ abstract class FSConnection extends StrictLogging {
       Future
         .firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
         .map(fsSocket => {
-          fsSocket.fsConnection.setConnectionId(fsSocket.channelData.headers.getOrElse(HeaderNames.uniqueId,
-            fsSocket.fsConnection.getConnectionId))
+          fsSocket.fsConnection.setConnectionId(
+            fsSocket.channelData.headers.getOrElse(
+              HeaderNames.uniqueId,
+              fsSocket.fsConnection.getConnectionId
+            )
+          )
           fun(Future.successful(fsSocket))
-         })
+        })
         .transform(_ match {
-          case failure@Failure(ex) =>
-            adapter.error(logMarker, ex, "About to shutdown due to exception in Future sink")
+          case failure @ Failure(ex) =>
+            adapter.error(
+              logMarker,
+              ex,
+              "About to shutdown due to exception in Future sink"
+            )
             sharedKillSwitch.shutdown()
             queue.complete()
             failure
           case success => success
         })
     )
-    lazy val connectToFS = (fsData: FSData, hasConnected:Boolean) => {
+    lazy val connectToFS = (fsData: FSData, hasConnected: Boolean) => {
       fsData.fsMessages match {
-        case ::(command: CommandReply, _) if (command.headers.contains(HeaderNames.uniqueId)) =>
+        case ::(command: CommandReply, _)
+            if (command.headers.contains(HeaderNames.uniqueId)) =>
           if (command.success) {
             fsConnectionPromise.complete(
               Success(FSSocket(fsConnection, ChannelData(command.headers)))
             )
             if (lingering) publishNonMappingCommand(LingerCommand)
-            (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)), true)
+            (
+              fsData
+                .copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),
+              true
+            )
           } else {
-            adapter.error(logMarker, s"Socket failed to make connection with an error: ${command.errorMessage}")
+            adapter.error(
+              logMarker,
+              s"Socket failed to make connection with an error: ${command.errorMessage}"
+            )
             fsConnectionPromise.complete(
               Failure(
                 new Exception(
@@ -235,12 +285,19 @@ abstract class FSConnection extends StrictLogging {
       }
     }
 
-    lazy val doLinger = (fsData: FSData, isLingering:Boolean) => {
+    lazy val doLinger = (fsData: FSData, isLingering: Boolean) => {
       fsData.fsMessages match {
         case ::(command: CommandReply, _) =>
-          adapter.info(logMarker, s"Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}")
+          adapter.info(
+            logMarker,
+            s"Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}"
+          )
           if (command.success) {
-            (fsData.copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)), true)
+            (
+              fsData
+                .copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),
+              true
+            )
           } else {
             (fsData, isLingering)
           }
@@ -252,40 +309,58 @@ abstract class FSConnection extends StrictLogging {
       fSData.fsMessages.filter(a => a.contentType == ContentTypes.commandReply)
     }
 
-    Flow[FSData].statefulMapConcat( () => {
-      var hasConnected: Boolean = false
-      var isLingering: Boolean = false
-      fSData => {
-        val cmdReplies = getCmdReplies(fSData)
-        val isConnect = cmdReplies.foldLeft(false)((_, b) => b.headers.contains(HeaderNames.uniqueId))
-        val updatedFSData = if (cmdReplies.nonEmpty && !hasConnected && isConnect) {
-          val con = connectToFS(fSData,hasConnected)
-          hasConnected=con._2
-          con._1
-        }
-        else if (cmdReplies.nonEmpty && lingering && !isLingering && !isConnect && cmdReplies.count {
-          case a: CommandReply => a.replyText.getOrElse("") == "+OK will linger"
-        } > 0) {
-          val ling = doLinger(fSData,isLingering)
-          isLingering=ling._2
-          ling._1
-        } else {
-          if (hasConnected && isLingering) {
-            val (messagesWithSameId, messagesWithDifferentId) = fSData.fsMessages.partition {
-              message =>
-                message.headers.get(HeaderNames.uniqueId).fold(true)(x => x == getConnectionId || getOriginatedCallIds.contains(x))
+    Flow[FSData]
+      .statefulMapConcat(() => {
+        var hasConnected: Boolean = false
+        var isLingering: Boolean = false
+        fSData => {
+          val cmdReplies = getCmdReplies(fSData)
+          val isConnect = cmdReplies.foldLeft(false)((_, b) =>
+            b.headers.contains(HeaderNames.uniqueId)
+          )
+          val updatedFSData =
+            if (cmdReplies.nonEmpty && !hasConnected && isConnect) {
+              val con = connectToFS(fSData, hasConnected)
+              hasConnected = con._2
+              con._1
+            } else if (
+              cmdReplies.nonEmpty && lingering && !isLingering && !isConnect && cmdReplies
+                .count {
+                  case a: CommandReply =>
+                    a.replyText.getOrElse("") == "+OK will linger"
+                } > 0
+            ) {
+              val ling = doLinger(fSData, isLingering)
+              isLingering = ling._2
+              ling._1
+            } else {
+              if (hasConnected && isLingering) {
+                val (messagesWithSameId, messagesWithDifferentId) =
+                  fSData.fsMessages.partition { message =>
+                    message.headers
+                      .get(HeaderNames.uniqueId)
+                      .fold(true)(x =>
+                        x == getConnectionId || getOriginatedCallIds.contains(x)
+                      )
+                  }
+                if (messagesWithDifferentId.nonEmpty) {
+                  adapter.warning(
+                    logMarker,
+                    s"""CALL-ID: ${connectionId} socket has received ${messagesWithDifferentId.length} message(s) from other call-ids"""
+                  )
+                }
+                fSData.copy(fsMessages = messagesWithSameId)
+              } else fSData
             }
-            if(messagesWithDifferentId.nonEmpty) {
-              adapter.warning(logMarker,
-                s"""CALL-ID: ${connectionId} socket has received ${messagesWithDifferentId.length} message(s) from other call-ids""")
-            }
-            fSData.copy(fsMessages = messagesWithSameId)
-          } else fSData
+          //Send every message
+          List(
+            updatedFSData
+              .copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f)))
+          )
         }
-        //Send every message
-        List(updatedFSData.copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f))))
-      }
-    }).addAttributes(ActorAttributes.supervisionStrategy(decider)).toMat(futureSink)(Keep.right)
+      })
+      .addAttributes(ActorAttributes.supervisionStrategy(decider))
+      .toMat(futureSink)(Keep.right)
   }
 
   /**
@@ -311,8 +386,8 @@ abstract class FSConnection extends StrictLogging {
     * @return CommandReply
     */
   private def handleCommandReplyMessage(
-                                         cmdReply: CommandReply
-                                       ): CommandReply = {
+      cmdReply: CommandReply
+  ): CommandReply = {
     if (commandQueue.nonEmpty) {
       val promise = commandQueue.dequeue()
       if (cmdReply.success)
@@ -359,8 +434,32 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[QueueOfferResult]
     */
   protected def publishNonMappingCommand(
-                                          command: FSCommand
-                                        ): Future[QueueOfferResult] = queue.offer(command)
+      command: FSCommand
+  ): Future[QueueOfferResult] = {
+
+    val offerF = queue
+      .offer(command)
+
+    if (onCommandCallbacks.nonEmpty) {
+      offerF
+        .map({ offer =>
+          onCommandCallbacks
+            .foreach(
+              _.lift(FireAndForgetFSCommand(command, Success(offer)))
+            )
+          offer
+        })
+        .recoverWith({
+          case e => {
+            onCommandCallbacks
+              .foreach(_.lift(FireAndForgetFSCommand(command, Failure(e))))
+            Future.failed(e)
+          }
+        })
+    } else {
+      offerF
+    }
+  }
 
   /**
     * publish FS command to FS, An enqueue command into `commandQueue` and add command with events promises into `eventMap`
@@ -369,13 +468,44 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   private def publishCommand(command: FSCommand): Future[CommandResponse] = {
-    queue.offer(command).map { _ =>
-      val (commandReply, commandToQueue, cmdResponse) =
-        buildCommandAndResponse(command)
-      commandQueue.enqueue(commandReply)
-      eventMap += command.eventUuid -> commandToQueue
-      cmdResponse
+    val offerF = queue
+      .offer(command)
+      .map({ offer =>
+        val (commandReply, commandToQueue, cmdResponse) =
+          buildCommandAndResponse(command)
+        commandQueue.enqueue(commandReply)
+        eventMap += command.eventUuid -> commandToQueue
+        onCommandCallbacks
+          .foreach(
+            _.lift(
+              AwaitingFSCommand(
+                command,
+                Success(
+                  offer -> AwaitFSCommandResponse(
+                    cmdResponse.commandReply,
+                    cmdResponse.executeEvent,
+                    cmdResponse.executeComplete
+                  )
+                )
+              )
+            )
+          )
+        cmdResponse
+      })
+
+    if (onCommandCallbacks.nonEmpty) {
+      offerF
+        .recoverWith({
+          case e => {
+            onCommandCallbacks
+              .foreach(_.lift(AwaitingFSCommand(command, Failure(e))))
+            Future.failed(e)
+          }
+        })
+    } else {
+      offerF
     }
+
   }
 
   /**
@@ -386,9 +516,9 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def play(
-            fileName: String,
-            config: ApplicationCommandConfig = ApplicationCommandConfig()
-          ): Future[CommandResponse] =
+      fileName: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(PlayFile(fileName, config))
 
   /**
@@ -400,9 +530,9 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def transfer(
-                extension: String,
-                config: ApplicationCommandConfig = ApplicationCommandConfig()
-              ): Future[CommandResponse] =
+      extension: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(TransferTo(extension, config))
 
   /**
@@ -414,9 +544,9 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def hangup(
-              cause: Option[HangupCause] = Option.empty,
-              config: ApplicationCommandConfig = ApplicationCommandConfig()
-            ): Future[CommandResponse] =
+      cause: Option[HangupCause] = Option.empty,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(Hangup(cause, config))
 
   /**
@@ -427,8 +557,8 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def break(
-             config: ApplicationCommandConfig = ApplicationCommandConfig()
-           ): Future[CommandResponse] =
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(Break(config))
 
   /**
@@ -441,8 +571,8 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def answer(
-              config: ApplicationCommandConfig = ApplicationCommandConfig()
-            ): Future[CommandResponse] =
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(Answer(config))
 
   /**
@@ -476,9 +606,9 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def filter(
-              events: Map[EventName, String],
-              config: ApplicationCommandConfig = ApplicationCommandConfig()
-            ): Future[CommandResponse] =
+      events: Map[EventName, String],
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(Filter(events, config))
 
   /**
@@ -493,14 +623,12 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def filterUUId(
-                  uuid: String,
-                  config: ApplicationCommandConfig = ApplicationCommandConfig()
-                ): Future[CommandResponse] = {
+      uuid: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] = {
     setOriginatedCallIds(uuid)
     publishCommand(FilterUUId(uuid, config))
   }
-
-
 
   /**
     * filter delete
@@ -514,9 +642,9 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def deleteFilter(
-                    events: Map[EventName, String],
-                    config: ApplicationCommandConfig = ApplicationCommandConfig()
-                  ): Future[CommandResponse] =
+      events: Map[EventName, String],
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(DeleteFilter(events, config))
 
   /**
@@ -531,9 +659,9 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def deleteUUIdFilter(
-                        uuid: String,
-                        config: ApplicationCommandConfig = ApplicationCommandConfig()
-                      ): Future[CommandResponse] =
+      uuid: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(DeleteUUIdFilter(uuid, config))
 
   /**
@@ -548,12 +676,12 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def attXfer(
-               destination: String,
-               conferenceKey: Char = '0',
-               hangupKey: Char = '*',
-               cancelKey: Char = '#',
-               config: ApplicationCommandConfig = ApplicationCommandConfig()
-             ): Future[CommandResponse] =
+      destination: String,
+      conferenceKey: Char = '0',
+      hangupKey: Char = '*',
+      cancelKey: Char = '#',
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(
       AttXfer(destination, conferenceKey, hangupKey, cancelKey, config)
     )
@@ -571,10 +699,10 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def bridge(
-              targets: List[String],
-              dialType: DialType,
-              config: ApplicationCommandConfig = ApplicationCommandConfig()
-            ): Future[CommandResponse] =
+      targets: List[String],
+      dialType: DialType,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(Bridge(targets, dialType, config))
 
   /**
@@ -586,9 +714,9 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def intercept(
-                 uuid: String,
-                 config: ApplicationCommandConfig = ApplicationCommandConfig()
-               ): Future[CommandResponse] =
+      uuid: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(Intercept(uuid, config))
 
   /**
@@ -606,11 +734,11 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def read(min: Int, max: Int)(
-    soundFile: String,
-    variableName: String,
-    timeout: Duration,
-    terminators: List[Char] = List('#'),
-    config: ApplicationCommandConfig = ApplicationCommandConfig()
+      soundFile: String,
+      variableName: String,
+      timeout: Duration,
+      terminators: List[Char] = List('#'),
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
   ): Future[CommandResponse] =
     publishCommand(
       Read(
@@ -653,9 +781,9 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def sleep(
-             numberOfMillis: Duration,
-             config: ApplicationCommandConfig = ApplicationCommandConfig()
-           ): Future[CommandResponse] =
+      numberOfMillis: Duration,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(Sleep(numberOfMillis, config))
 
   /**
@@ -668,10 +796,10 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def setVar(
-              varName: String,
-              varValue: String,
-              config: ApplicationCommandConfig = ApplicationCommandConfig()
-            ): Future[CommandResponse] =
+      varName: String,
+      varValue: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(SetVar(varName, varValue, config))
 
   /**
@@ -681,8 +809,8 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def preAnswer(
-                 config: ApplicationCommandConfig = ApplicationCommandConfig()
-               ): Future[CommandResponse] =
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(PreAnswer(config))
 
   /**
@@ -703,12 +831,12 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def record(
-              filePath: String,
-              timeLimitSecs: Duration,
-              silenceThresh: Duration,
-              silenceHits: Option[Duration] = Option.empty,
-              config: ApplicationCommandConfig = ApplicationCommandConfig()
-            ): Future[CommandResponse] =
+      filePath: String,
+      timeLimitSecs: Duration,
+      silenceThresh: Duration,
+      silenceHits: Option[Duration] = Option.empty,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(
       Record(filePath, timeLimitSecs, silenceThresh, silenceHits, config)
     )
@@ -722,9 +850,9 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def recordSession(
-                     filePathWithFormat: String,
-                     config: ApplicationCommandConfig = ApplicationCommandConfig()
-                   ): Future[CommandResponse] =
+      filePathWithFormat: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(RecordSession(filePathWithFormat, config))
 
   /**
@@ -737,10 +865,10 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def sendDtmf(
-                dtmfDigits: String,
-                toneDuration: Option[Duration] = Option.empty,
-                config: ApplicationCommandConfig = ApplicationCommandConfig()
-              ): Future[CommandResponse] =
+      dtmfDigits: String,
+      toneDuration: Option[Duration] = Option.empty,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(SendDtmf(dtmfDigits, toneDuration, config))
 
   /**
@@ -752,9 +880,9 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def stopRecordSession(
-                         filePath: String,
-                         config: ApplicationCommandConfig = ApplicationCommandConfig()
-                       ): Future[CommandResponse] =
+      filePath: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(StopRecordSession(filePath, config))
 
   /**
@@ -770,8 +898,8 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def park(
-            config: ApplicationCommandConfig = ApplicationCommandConfig()
-          ): Future[CommandResponse] =
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(Park(config))
 
   /**
@@ -781,9 +909,9 @@ abstract class FSConnection extends StrictLogging {
     * @param config   : ApplicationCommandConfig
     */
   def log(
-           logLevel: String,
-           config: ApplicationCommandConfig = ApplicationCommandConfig()
-         ): Future[CommandResponse] =
+      logLevel: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
     publishCommand(Log(logLevel, config))
 
   /**
@@ -792,8 +920,8 @@ abstract class FSConnection extends StrictLogging {
     * @param config : ApplicationCommandConfig
     */
   def exit(
-            config: ApplicationCommandConfig = ApplicationCommandConfig()
-          ): Future[CommandResponse] = {
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] = {
     publishCommand(Exit(config))
   }
 
@@ -801,6 +929,26 @@ abstract class FSConnection extends StrictLogging {
 }
 
 object FSConnection {
+
+  sealed trait FSCommandPublication {
+    def command: FSCommand
+  }
+
+  case class FireAndForgetFSCommand(
+      command: FSCommand,
+      queueOfferResult: Try[QueueOfferResult]
+  ) extends FSCommandPublication
+
+  case class AwaitingFSCommand(
+      command: FSCommand,
+      result: Try[(QueueOfferResult, AwaitFSCommandResponse)]
+  ) extends FSCommandPublication
+
+  case class AwaitFSCommandResponse(
+      reply: Future[CommandReply],
+      execute: Future[EventMessage],
+      complete: Future[EventMessage]
+  )
 
   private type CommandBuilder =
     (Promise[CommandReply], CommandToQueue, CommandResponse)
@@ -813,10 +961,10 @@ object FSConnection {
     * @param executeComplete : Promise[EventMessage] this has to be complete when socket receive ChannelExecuteComplete event
     */
   case class CommandToQueue(
-                             command: FSCommand,
-                             executeEvent: Promise[EventMessage],
-                             executeComplete: Promise[EventMessage]
-                           )
+      command: FSCommand,
+      executeEvent: Promise[EventMessage],
+      executeComplete: Promise[EventMessage]
+  )
 
   /**
     * It is the response of FS command that has command and events Futures
@@ -827,11 +975,11 @@ object FSConnection {
     * @param executeComplete : Future[EventMessage] this is the ChannelExecuteComplete event response of FS command
     */
   case class CommandResponse(
-                              command: FSCommand,
-                              commandReply: Future[CommandReply],
-                              executeEvent: Future[EventMessage],
-                              executeComplete: Future[EventMessage]
-                            )
+      command: FSCommand,
+      commandReply: Future[CommandReply],
+      executeEvent: Future[EventMessage],
+      executeComplete: Future[EventMessage]
+  )
 
   /**
     *
@@ -864,9 +1012,9 @@ object FSConnection {
     * @tparam FS type of Fs connection, it could be Inbound/Outbound
     */
   case class FSSocket[FS <: FSConnection](
-                                           fsConnection: FS,
-                                           channelData: ChannelData
-                                         )
+      fsConnection: FS,
+      channelData: ChannelData
+  )
 
   case class FSData(fSConnection: FSConnection, fsMessages: List[FSMessage])
 

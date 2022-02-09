@@ -18,7 +18,15 @@ package esl
 
 import akka.actor.ActorSystem
 import akka.event.{LogMarker, MarkerLoggingAdapter}
-import akka.stream.{ActorAttributes, Attributes, KillSwitches, Materializer, NeverMaterializedException, OverflowStrategy, Supervision}
+import akka.stream.{
+  ActorAttributes,
+  Attributes,
+  KillSwitches,
+  Materializer,
+  NeverMaterializedException,
+  OverflowStrategy,
+  Supervision
+}
 import akka.stream.scaladsl.Tcp.IncomingConnection
 import akka.stream.scaladsl.{BidiFlow, Framing, Sink, Source, Tcp}
 import akka.util.ByteString
@@ -28,7 +36,12 @@ import com.typesafe.scalalogging.LazyLogging
 import esl.FSConnection.{FSData, FSSocket}
 import scala.language.postfixOps
 
-import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration, SECONDS}
+import scala.concurrent.duration.{
+  Duration,
+  DurationInt,
+  FiniteDuration,
+  SECONDS
+}
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -38,6 +51,7 @@ object OutboundServer {
   private val fsTimeout = "freeswitch.outbound.startup.timeout"
   private val linger = "freeswitch.outbound.linger"
   private val defaultTimeout = Duration(5, SECONDS)
+
   /**
     * Create a OutBound server with given configuration and parser
     *
@@ -70,16 +84,19 @@ object OutboundServer {
   )(implicit
       system: ActorSystem,
       materializer: Materializer,
-     adapter: MarkerLoggingAdapter
+      adapter: MarkerLoggingAdapter
   ): OutboundServer =
     new OutboundServer(interface, port, timeout, linger)
 
 }
 
-class OutboundServer(address: String, port: Int,
-                     timeout: FiniteDuration,
-                     linger: Boolean)(
-    implicit
+class OutboundServer(
+    address: String,
+    port: Int,
+    timeout: FiniteDuration,
+    linger: Boolean,
+    enableDebugLogs: Boolean = false
+)(implicit
     system: ActorSystem,
     materializer: Materializer,
     adapter: MarkerLoggingAdapter
@@ -88,11 +105,18 @@ class OutboundServer(address: String, port: Int,
 
   def this(
       config: Config
-  )(implicit system: ActorSystem, materializer: Materializer, adapter: MarkerLoggingAdapter) =
+  )(implicit
+      system: ActorSystem,
+      materializer: Materializer,
+      adapter: MarkerLoggingAdapter
+  ) =
     this(
       config.getString(OutboundServer.address),
       config.getInt(OutboundServer.port),
-      Duration(config.getDuration(OutboundServer.fsTimeout).getSeconds, SECONDS),
+      Duration(
+        config.getDuration(OutboundServer.fsTimeout).getSeconds,
+        SECONDS
+      ),
       config.getBoolean(OutboundServer.linger)
     )
 
@@ -126,69 +150,102 @@ class OutboundServer(address: String, port: Int,
       ),
       onFsConnectionClosed: Future[IncomingConnection] => Unit
   ): Future[Done] = {
-    Tcp().bind(address, port, backlog = 1000, idleTimeout = 20 seconds).runForeach { connection =>
-      adapter
-        .info(s"Socket connection is opened for ${connection.remoteAddress}")
+    Tcp()
+      .bind(address, port, backlog = 1000, idleTimeout = 20 seconds)
+      .runForeach { connection =>
+        adapter
+          .info(s"Socket connection is opened for ${connection.remoteAddress}")
 
-      val fsConnection = OutboundFSConnection()
-      fsConnection.connect().map { _ =>
-        lazy val sink = fsConnection.init(
-          Promise[FSSocket[OutboundFSConnection]](),
-          fsConnection,
-          fun,
-          timeout,
-          linger
-        )
-        val (source, protocol) = flow(fsConnection)
+        val fsConnection = OutboundFSConnection()
+        fsConnection.connect().map { _ =>
+          lazy val sink = fsConnection.init(
+            Promise[FSSocket[OutboundFSConnection]](),
+            fsConnection,
+            fun,
+            timeout,
+            linger
+          )
+          val (source, protocol) = flow(fsConnection)
 
-        val decider: Supervision.Decider = {
-          case _: NullPointerException => {
-            adapter.error(fsConnection.logMarker, "NullPointerException in Supervisor Resume")
-            Supervision.Resume
-          }
-          case ex => {
-            adapter.error(fsConnection.logMarker, ex, "Exception in Supervisor Stop")
-            Supervision.Stop
-          }
-        }
-
-        val (_, closed: Future[Any]) = connection.flow
-          .join(protocol)
-          .recover {
-            case e => {
-              adapter.error(fsConnection.logMarker, e.getMessage, e)
-              throw e
+          val decider: Supervision.Decider = {
+            case _: NullPointerException => {
+              adapter.error(
+                fsConnection.logMarker,
+                "NullPointerException in Supervisor Resume"
+              )
+              Supervision.Resume
+            }
+            case ex => {
+              adapter.error(
+                fsConnection.logMarker,
+                ex,
+                "Exception in Supervisor Stop"
+              )
+              Supervision.Stop
             }
           }
-          .buffer(1000, OverflowStrategy.fail)
-          .logWithMarker(name = "esl-freeswitch-in", e => LogMarker(name = "esl-freeswitch-in", properties = Map("element" -> e, "connection" -> fsConnection.getConnectionId)))
-          .addAttributes(
-            Attributes.logLevels(
-              onElement = Attributes.LogLevels.Info,
-              onFinish = Attributes.LogLevels.Info,
-              onFailure = Attributes.LogLevels.Error))
-          .addAttributes(ActorAttributes.supervisionStrategy(decider))
-          .runWith(source, sink)
 
-        val closedConn = closed.transform {
-          case Success(_) =>
-            adapter.info(fsConnection.logMarker,
-              s"Socket connection has been closed successfully for ${connection.remoteAddress}"
-            )
-            Success(connection)
-          case Failure(ex: NeverMaterializedException) =>
-            adapter.debug(fsConnection.logMarker,
-              s"Connection from ${connection.remoteAddress} cancelled as it was not FreeSwitch"
-            )
-            Failure(ex)
-          case Failure(ex) =>
-            adapter.warning(fsConnection.logMarker,
-              s"Socket connection failed to closed for ${connection.remoteAddress}"
-            )
-            Failure(ex)
+          val (_, closed: Future[Any]) = {
+            val flowStage1 = connection.flow
+              .join(protocol)
+              .recover {
+                case e => {
+                  adapter.error(fsConnection.logMarker, e.getMessage, e)
+                  throw e
+                }
+              }
+              .buffer(1000, OverflowStrategy.fail)
+
+            {
+              if (enableDebugLogs) {
+                flowStage1
+                  .logWithMarker(
+                    name = "esl-freeswitch-in",
+                    e =>
+                      LogMarker(
+                        name = "esl-freeswitch-in",
+                        properties = Map(
+                          "element" -> e,
+                          "connection" -> fsConnection.getConnectionId
+                        )
+                      )
+                  )
+                  .addAttributes(
+                    Attributes.logLevels(
+                      onElement = Attributes.LogLevels.Info,
+                      onFinish = Attributes.LogLevels.Info,
+                      onFailure = Attributes.LogLevels.Error
+                    )
+                  )
+              } else {
+                flowStage1
+              }
+            }.addAttributes(ActorAttributes.supervisionStrategy(decider))
+              .runWith(source, sink)
+          }
+
+          val closedConn = closed.transform {
+            case Success(_) =>
+              adapter.info(
+                fsConnection.logMarker,
+                s"Socket connection has been closed successfully for ${connection.remoteAddress}"
+              )
+              Success(connection)
+            case Failure(ex: NeverMaterializedException) =>
+              adapter.debug(
+                fsConnection.logMarker,
+                s"Connection from ${connection.remoteAddress} cancelled as it was not FreeSwitch"
+              )
+              Failure(ex)
+            case Failure(ex) =>
+              adapter.warning(
+                fsConnection.logMarker,
+                s"Socket connection failed to closed for ${connection.remoteAddress}"
+              )
+              Failure(ex)
+          }
+          onFsConnectionClosed(closedConn)
         }
-        onFsConnectionClosed(closedConn)
       }
-    }
   }
 }
