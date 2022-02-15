@@ -309,6 +309,21 @@ abstract class FSConnection extends StrictLogging {
       fSData.fsMessages.filter(a => a.contentType == ContentTypes.commandReply)
     }
 
+    def freeSwitchMsgToString(msg: FSMessage): String = {
+      val space = "    "
+      s""">> TYPE
+         |$space${msg.getClass.getSimpleName} ${msg.headers.getOrElse(
+        HeaderNames.eventName,
+        "NA"
+      )}
+         |>> HEADERS
+         |${msg.headers
+        .map(h => h._1 + " : " + h._2)
+        .mkString(space, "\n" + space, "")}
+         |>> BODY
+         |$space${msg.body.getOrElse("NA")}""".stripMargin
+    }
+
     Flow[FSData]
       .statefulMapConcat(() => {
         var hasConnected: Boolean = false
@@ -374,20 +389,6 @@ abstract class FSConnection extends StrictLogging {
       .addAttributes(ActorAttributes.supervisionStrategy(decider))
       .toMat(futureSink)(Keep.right)
 
-    def freeSwitchMsgToString(msg: FSMessage): String = {
-      val space = "    "
-      s""">> TYPE
-         |$space${msg.getClass.getSimpleName} ${msg.headers.getOrElse(
-        HeaderNames.eventName,
-        "NA"
-      )}
-         |>> HEADERS
-         |${msg.headers
-        .map(h => h._1 + " : " + h._2)
-        .mkString(space, "\n" + space, "")}
-         |>> BODY
-         |$space${msg.body.getOrElse("NA")}""".stripMargin
-    }
   }
 
   /**
