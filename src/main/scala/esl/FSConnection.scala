@@ -346,10 +346,17 @@ abstract class FSConnection extends StrictLogging {
                 if (messagesWithDifferentId.nonEmpty) {
                   adapter.warning(
                     logMarker,
-                    s"""CALL $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other call-ids
-                       |${messagesWithDifferentId
+                    s"""CALL $getConnectionId $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other calls
+                       |getOriginatedCallIds = ${getOriginatedCallIds
+                      .mkString("[", ",", "]")}
+                       |other call ids ${messagesWithDifferentId
                       .map(_.headers(HeaderNames.uniqueId))
-                      .mkString("[", ",", "]")}""".stripMargin
+                      .mkString("[", ",", "]")}
+                      |
+                      |------  messages below -----
+                      |${messagesWithDifferentId
+                      .map(freeSwitchMsgToString)
+                      .mkString("\n----")}""".stripMargin
                   )
                 }
                 fSData.copy(fsMessages = messagesWithSameId)
@@ -366,6 +373,21 @@ abstract class FSConnection extends StrictLogging {
       })
       .addAttributes(ActorAttributes.supervisionStrategy(decider))
       .toMat(futureSink)(Keep.right)
+
+    def freeSwitchMsgToString(msg: FSMessage): String = {
+      val space = "    "
+      s""">> TYPE
+         |$space${msg.getClass.getSimpleName} ${msg.headers.getOrElse(
+        HeaderNames.eventName,
+        "NA"
+      )}
+         |>> HEADERS
+         |${msg.headers
+        .map(h => h._1 + " : " + h._2)
+        .mkString(space, "\n" + space, "")}
+         |>> BODY
+         |$space${msg.body.getOrElse("NA")}""".stripMargin
+    }
   }
 
   /**
