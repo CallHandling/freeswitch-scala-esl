@@ -355,7 +355,9 @@ abstract class FSConnection extends StrictLogging {
           //Send every message
           List(
             updatedFSData
-              .copy(fsMessages = fSData.fsMessages.map(f => handleFSMessage(f)))
+              .copy(fsMessages =
+                updatedFSData.fsMessages.map(f => handleFSMessage(f))
+              )
           )
         }
       })
