@@ -346,7 +346,10 @@ abstract class FSConnection extends StrictLogging {
                 if (messagesWithDifferentId.nonEmpty) {
                   adapter.warning(
                     logMarker,
-                    s"""CALL-ID: ${connectionId} socket has received ${messagesWithDifferentId.length} message(s) from other call-ids"""
+                    s"""CALL $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other call-ids
+                       |${messagesWithDifferentId
+                      .map(_.headers(HeaderNames.uniqueId))
+                      .mkString("[", ",", "]")}""".stripMargin
                   )
                 }
                 fSData.copy(fsMessages = messagesWithSameId)
