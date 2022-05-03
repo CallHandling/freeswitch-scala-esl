@@ -78,7 +78,7 @@ abstract class FSConnection extends StrictLogging {
 
   def logMarker = LogMarker("hubbub-esl-fs", Map("CALL-ID" -> getConnectionId))
 
-  private[this] val sharedKillSwitch =
+  private[this] val killSwitch =
     KillSwitches.shared("kill-" + getConnectionId)
 
   /**
@@ -104,7 +104,6 @@ abstract class FSConnection extends StrictLogging {
   protected[this] lazy val (queue, source) = {
     val sourceStage1 = Source
       .queue[FSCommand](50, OverflowStrategy.fail)
-      .via(sharedKillSwitch.flow);
 
     {
       if (enableDebugLogs) {
@@ -140,8 +139,9 @@ abstract class FSConnection extends StrictLogging {
     * It will parsed incoming packet into free switch messages. If there is an unparsed packet from last received packets,
     * will append to the next received packets. So we will get the complete parsed packet.
     */
-  private[this] val upstreamFlow: Flow[ByteString, FSData, _] =
+  private[this] val downStreamFlow: Flow[ByteString, FSData, _] =
     Flow[ByteString]
+      .via(killSwitch.flow)
       .addAttributes(ActorAttributes.supervisionStrategy(decider))
       .statefulMapConcat(() => {
         var unParsedBuffer: String = ""
@@ -163,7 +163,7 @@ abstract class FSConnection extends StrictLogging {
   /**
     * It will convert the FS command into ByteString
     */
-  private[this] val downstreamFlow: Flow[FSCommand, ByteString, _] =
+  private[this] val upStreamFlow: Flow[FSCommand, ByteString, _] =
     Flow.fromFunction { fsCommand =>
       val str =
         try { fsCommand.toString }
@@ -188,15 +188,12 @@ abstract class FSConnection extends StrictLogging {
     (
       Source
         .fromPublisher(source)
-        .addAttributes(ActorAttributes.supervisionStrategy(decider))
-        .via(sharedKillSwitch.flow),
+        .addAttributes(ActorAttributes.supervisionStrategy(decider)),
       BidiFlow.fromFlows(
-        upstreamFlow
+        downStreamFlow
+          .addAttributes(ActorAttributes.supervisionStrategy(decider)),
+        upStreamFlow
           .addAttributes(ActorAttributes.supervisionStrategy(decider))
-          .via(sharedKillSwitch.flow),
-        downstreamFlow
-          .addAttributes(ActorAttributes.supervisionStrategy(decider))
-          .via(sharedKillSwitch.flow)
       )
     )
   }
@@ -240,15 +237,14 @@ abstract class FSConnection extends StrictLogging {
           )
           fun(Future.successful(fsSocket))
         })
-        .transform(_ match {
+        .transform({
           case failure @ Failure(ex) =>
             adapter.error(
               logMarker,
               ex,
               "About to shutdown due to exception in Future sink"
             )
-            sharedKillSwitch.shutdown()
-            queue.complete()
+            kill
             failure
           case success => success
         })
@@ -953,7 +949,10 @@ abstract class FSConnection extends StrictLogging {
     publishCommand(Exit(config))
   }
 
-  def kill = sharedKillSwitch.shutdown()
+  def kill = {
+    killSwitch.shutdown()
+    queue.complete()
+  }
 }
 
 object FSConnection {
