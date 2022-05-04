@@ -65,7 +65,7 @@ class FSConnectionSpec
 
   "A handler function" should {
     "handle upstream flow and parse incoming data into FS messages" in new FSConnectionFixture {
-      val (source, bidiFlow) = connection.handler()
+      val (_, source, bidiFlow) = connection.handler()
       val upstreamSource =
         Source.single(ByteString(TestMessages.setVarPrivateCommand))
       val (downStream, upStream) = runGraph(
@@ -81,7 +81,7 @@ class FSConnectionSpec
     }
 
     "handle downstream stream and push FS command to downstream" in new FSConnectionFixture {
-      val (_, bidiFlow) = connection.handler()
+      val (_, _, bidiFlow) = connection.handler()
       val fsCmd = PlayFile(
         "/usr/share/freeswitch/sounds/en/us/callie/voicemail/8000/vm-tutorial_change_pin.wav",
         ApplicationCommandConfig()
