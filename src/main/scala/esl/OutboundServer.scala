@@ -46,6 +46,21 @@ import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
 object OutboundServer {
+
+  /**
+    * type alias for Flow Completion callbacks
+    * arg 1 = IncomingConnection
+    * arg 2 = Upstream Completion Future
+    * arg 3 = Downstream Completion Future
+    */
+  type OnCompletionCallBack[-Mat] =
+    (IncomingConnection, Future[Done], Future[Mat]) => Unit
+
+  object OnCompletionCallBack {
+    lazy val noop: OnCompletionCallBack[Any] =
+      (_: IncomingConnection, _: Future[Done], _: Future[Any]) => Unit
+  }
+
   private val address = "freeswitch.outbound.address"
   private val port = "freeswitch.outbound.port"
   private val fsTimeout = "freeswitch.outbound.startup.timeout"
@@ -134,7 +149,8 @@ class OutboundServer(
     */
   def startWith[Mat](
       fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, Mat],
-      onFsConnectionClosed: Future[IncomingConnection] => Unit = _ => ()
+      onFsConnectionClosed: OutboundServer.OnCompletionCallBack[Mat] =
+        OutboundServer.OnCompletionCallBack.noop
   ): Future[Done] =
     server(fun, fsConnection => fsConnection.handler(), onFsConnectionClosed)
 
@@ -150,17 +166,15 @@ class OutboundServer(
   private[this] def server[T, Mat1](
       fun: Future[FSSocket[OutboundFSConnection]] => Sink[FSData, Mat1],
       flow: OutboundFSConnection => (
+          Future[Done],
           Source[T, NotUsed],
           BidiFlow[ByteString, FSData, T, ByteString, NotUsed]
       ),
-      onFsConnectionClosed: Future[IncomingConnection] => Unit
+      onFsConnectionClosed: OutboundServer.OnCompletionCallBack[Mat1]
   ): Future[Done] = {
     Tcp()
       .bind(address, port, backlog = 1000, idleTimeout = 20 seconds)
       .runForeach { connection =>
-        adapter
-          .info(s"Socket connection is opened for ${connection.remoteAddress}")
-
         val fsConnection = OutboundFSConnection(enableDebugLogs)
         fsConnection.connect().map { _ =>
           lazy val sink = fsConnection.init(
@@ -170,7 +184,8 @@ class OutboundServer(
             timeout,
             linger
           )
-          val (source, protocol) = flow(fsConnection)
+
+          val (upStreamCompletion, source, protocol) = flow(fsConnection)
 
           val decider: Supervision.Decider = {
             case _: NullPointerException => {
@@ -190,7 +205,7 @@ class OutboundServer(
             }
           }
 
-          val (_, closed: Future[Any]) = {
+          val (_, closed: Future[Mat1]) = {
             val flowStage1 = connection.flow
               .join(protocol)
               .recover {
@@ -229,27 +244,45 @@ class OutboundServer(
               .runWith(source, sink)
           }
 
-          val closedConn = closed.transform {
+          adapter
+            .info(
+              fsConnection.logMarker,
+              s"CALL-ID ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] - Connection Success"
+            )
+
+          closed.onComplete {
             case Success(_) =>
               adapter.info(
                 fsConnection.logMarker,
-                s"Socket connection has been closed successfully for ${connection.remoteAddress}"
+                s"CALL-ID ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Downstream has been closed successfully"
               )
-              Success(connection)
             case Failure(ex: NeverMaterializedException) =>
               adapter.debug(
                 fsConnection.logMarker,
-                s"Connection from ${connection.remoteAddress} cancelled as it was not FreeSwitch"
+                s"CALL-ID ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Downstream closed with Never materialized exception"
               )
-              Failure(ex)
             case Failure(ex) =>
-              adapter.warning(
+              adapter.error(
                 fsConnection.logMarker,
-                s"Socket connection failed to closed for ${connection.remoteAddress}"
+                s"CALL-ID ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Downstream closed with error ${ex.getMessage}",
+                ex
               )
-              Failure(ex)
           }
-          onFsConnectionClosed(closedConn)
+
+          upStreamCompletion.onComplete {
+            case Success(_) =>
+              adapter.info(
+                fsConnection.logMarker,
+                s"CALL-ID ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Upstream has been closed successfully"
+              )
+            case Failure(ex) =>
+              adapter.error(
+                fsConnection.logMarker,
+                s"CALL-ID ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Upstream closed with error ${ex.getMessage}",
+                ex
+              )
+          }
+          onFsConnectionClosed(connection, upStreamCompletion, closed)
         }
       }
   }

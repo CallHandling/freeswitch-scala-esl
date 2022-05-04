@@ -16,7 +16,7 @@
 
 package esl
 
-import akka.NotUsed
+import akka.{Done, NotUsed}
 import akka.actor.ActorSystem
 import akka.pattern.after
 import akka.stream._
@@ -178,14 +178,16 @@ abstract class FSConnection extends StrictLogging {
   /**
     * handler() function will create pipeline for source and flow
     *
-    * @return Source[FSCommand, NotUsed], BidiFlow[ByteString, List[FSMessage], FSCommand, ByteString, NotUsed]
-    *         tuple of source and flow
+    * @return (Future[Done], Source[FSCommand, NotUsed], BidiFlow[ByteString, List[FSMessage], FSCommand, ByteString, NotUsed])
+    *         triplet of upstream queue completion future, source and flow
     */
   def handler(): (
+      Future[Done],
       Source[FSCommand, NotUsed],
       BidiFlow[ByteString, FSData, FSCommand, ByteString, NotUsed]
   ) = {
     (
+      queue.watchCompletion(),
       Source
         .fromPublisher(source)
         .addAttributes(ActorAttributes.supervisionStrategy(decider)),

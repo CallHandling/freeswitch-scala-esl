@@ -16,7 +16,7 @@
 
 package esl
 
-import akka.NotUsed
+import akka.{Done, NotUsed}
 import akka.actor.ActorSystem
 import akka.event.MarkerLoggingAdapter
 import akka.stream.Materializer
@@ -115,16 +115,18 @@ class InboundServer(
   private[this] def client[T1, T2, Mat1, Mat2](
       sink: Sink[T1, Mat1],
       flow: (
+          Future[Done],
           Source[T2, Mat2],
           BidiFlow[ByteString, T1, T2, ByteString, NotUsed]
       )
   ) = {
     val clientFlow = Tcp().outgoingConnection(interface, port)
-    val (source, protocol) = flow
+    val (upStreamCompletion, source, protocol) = flow
     val flowWithProtocol: Flow[T2, T1, Future[Tcp.OutgoingConnection]] =
       clientFlow
         .join(protocol)
-    flowWithProtocol.runWith(source, sink)
+    val (m1, m2) = flowWithProtocol.runWith(source, sink)
+    (upStreamCompletion, m1, m2)
   }
 
   /**
@@ -132,11 +134,11 @@ class InboundServer(
     *
     * @param password : String password for connection to freeswitch
     * @param fun      function will get freeswitch outbound connection after injecting sink
-    * @return Future[(Any, Any)]
+    * @return Future[(UpSourceCompletionFuture, DownStreamCompletionFuture)]
     */
   def connect[Mat](password: String)(
       fun: Future[FSSocket[InboundFSConnection]] => Sink[FSData, Mat]
-  ): Future[(NotUsed, Future[Any])] = {
+  ): Future[(Future[Done], Future[Mat])] = {
     val fsConnection = InboundFSConnection(enableDebugLogs)
     fsConnection.connect(password).map { _ =>
       val sink = fsConnection.init(
@@ -146,7 +148,8 @@ class InboundServer(
         timeout,
         linger
       )
-      client(sink, fsConnection.handler())
+      val (upCompF, _, downCompF) = client(sink, fsConnection.handler())
+      (upCompF, downCompF)
     }
   }
 
