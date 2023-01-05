@@ -20,9 +20,11 @@ import akka.stream.QueueOfferResult
 import esl.domain.EventNames.EventName
 
 import scala.concurrent.Future
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import CallCommands.{LINE_TERMINATOR, MESSAGE_TERMINATOR}
 import esl.domain.HangupCauses.HangupCause
+
+import scala.language.postfixOps
 
 sealed trait FSCommand {
   val eventUuid: String = java.util.UUID.randomUUID.toString
@@ -31,16 +33,24 @@ sealed trait FSCommand {
 sealed trait FSExecuteApp extends FSCommand {
   val config: ApplicationCommandConfig
   val application: String
-  val args: String = ""
+  def args: String = ""
 
   override def toString: String = {
     val b = StringBuilder.newBuilder
-    b.append(s"sendmsg ${config.channelUuid}${LINE_TERMINATOR}Event-UUID: $eventUuid$LINE_TERMINATOR")
-    b.append(s"call-command: execute${LINE_TERMINATOR}execute-app-name: $application$LINE_TERMINATOR")
-    if (config.eventLock) b.append(s"event-lock: ${config.eventLock}$LINE_TERMINATOR")
+    b.append(
+      s"sendmsg ${config.channelUuid}${LINE_TERMINATOR}Event-UUID: $eventUuid$LINE_TERMINATOR"
+    )
+    b.append(
+      s"call-command: execute${LINE_TERMINATOR}execute-app-name: $application$LINE_TERMINATOR"
+    )
+    if (config.eventLock)
+      b.append(s"event-lock: ${config.eventLock}$LINE_TERMINATOR")
     if (config.loops > 1) b.append(s"loops: ${config.loops}$LINE_TERMINATOR")
     if (config.async) b.append(s"async: ${config.async}$LINE_TERMINATOR")
-    if (args.length > 0) b.append(s"content-type: text/plain${LINE_TERMINATOR}content-length: ${args.length}$MESSAGE_TERMINATOR$args$LINE_TERMINATOR")
+    if (args.length > 0)
+      b.append(
+        s"content-type: text/plain${LINE_TERMINATOR}content-length: ${args.length}$MESSAGE_TERMINATOR$args$LINE_TERMINATOR"
+      )
     b.toString()
   }
 }
@@ -53,10 +63,18 @@ sealed trait FSExecuteApp extends FSCommand {
   * @param loops       Number of times to invoke the command, default 1
   * @param async       Set the execution mode to async, has no effect in Outbound async mode
   */
-final case class ApplicationCommandConfig(channelUuid: String = "", eventLock: Boolean = false,
-                                          loops: Int = 1, async: Boolean = false)
+final case class ApplicationCommandConfig(
+    channelUuid: String = "",
+    eventLock: Boolean = false,
+    loops: Int = 1,
+    async: Boolean = false
+)
 
 object CallCommands {
+
+  private implicit class CommandVarsSyntax(private val vars: Seq[String]) {
+    def asVarsString: String = vars.mkString("{", ",", "}")
+  }
 
   val MESSAGE_TERMINATOR = "\n\n"
   val LINE_TERMINATOR = "\n"
@@ -72,12 +90,17 @@ object CallCommands {
     * @param cause  : HangupCause
     * @param config : ApplicationCommandConfig
     */
-  final case class Hangup(cause: Option[HangupCause], config: ApplicationCommandConfig) extends FSExecuteApp {
-    override val application: String = cause.fold(s"hangup$MESSAGE_TERMINATOR")(_ => "hangup")
+  final case class Hangup(
+      cause: Option[HangupCause],
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
+    override val application: String =
+      cause.fold(s"hangup$MESSAGE_TERMINATOR")(_ => "hangup")
     override val args: String = cause.fold("")(_.name)
   }
 
-  final case class Break(config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class Break(config: ApplicationCommandConfig)
+      extends FSExecuteApp {
     override val application: String = s"break$MESSAGE_TERMINATOR"
   }
 
@@ -87,7 +110,8 @@ object CallCommands {
     * @param filePath : String file path that you want to play
     * @param config   : ApplicationCommandConfig
     */
-  final case class PlayFile(filePath: String, config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class PlayFile(filePath: String, config: ApplicationCommandConfig)
+      extends FSExecuteApp {
     override val application: String = "playback"
     override val args: String = filePath
   }
@@ -99,7 +123,10 @@ object CallCommands {
     * @param extension : String extension name
     * @param config    : ApplicationCommandConfig
     */
-  final case class TransferTo(extension: String, config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class TransferTo(
+      extension: String,
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
     override val application: String = "transfer"
     override val args: String = extension
   }
@@ -112,7 +139,8 @@ object CallCommands {
     *
     * @param config : ApplicationCommandConfig
     */
-  final case class Answer(config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class Answer(config: ApplicationCommandConfig)
+      extends FSExecuteApp {
     override val application: String = s"answer$MESSAGE_TERMINATOR"
   }
 
@@ -129,7 +157,11 @@ object CallCommands {
     * @param config   : ApplicationCommandConfig
     * @return Future[CommandReply]
     */
-  final case class SetVar(varName: String, varValue: String, config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class SetVar(
+      varName: String,
+      varValue: String,
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
     override val application: String = "set"
     override val args: String = s"$varName=$varValue"
   }
@@ -144,13 +176,16 @@ object CallCommands {
     * @param cancelKey     : Char "attxfer_cancel_key" - can be used to cancel a tranfer just like origination_cancel_key, but straight from the att_xfer code (deafault '#')
     * @param config        : ApplicationCommandConfig
     */
-  final case class AttXfer(destination: String,
-                           conferenceKey: Char,
-                           hangupKey: Char,
-                           cancelKey: Char,
-                           config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class AttXfer(
+      destination: String,
+      conferenceKey: Char,
+      hangupKey: Char,
+      cancelKey: Char,
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
     override val application: String = "att_xfer"
-    override val args: String = s"{attxfer_conf_key=$conferenceKey,attxfer_hangup_key=$hangupKey,attxfer_cancel_key=$cancelKey}$destination"
+    override val args: String =
+      s"{attxfer_conf_key=$conferenceKey,attxfer_hangup_key=$hangupKey,attxfer_cancel_key=$cancelKey}$destination"
   }
 
   /**
@@ -164,9 +199,61 @@ object CallCommands {
     *                 then separate targets by pipe(|)
     * @param config   :ApplicationCommandConfig
     */
-  final case class Bridge(targets: List[String], dialType: DialType, config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class Bridge(
+      targets: List[String],
+      dialType: DialType,
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
     override val application: String = "bridge"
     override val args: String = targets.mkString(dialType.separator)
+  }
+
+  final case class Dial(
+      target: String,
+      uniqueId: String,
+      numberPresentation: Dial.NumberPresentation,
+      config: ApplicationCommandConfig,
+      timeout: FiniteDuration,
+      retries: Option[Dial.Retry] = Option.empty
+  ) extends FSExecuteApp {
+    override lazy val application: String = "originate"
+    override lazy val args: String = {
+
+      val vars = Seq(
+        "ignore_early_media=true",
+        s"originate_timeout=${timeout.toSeconds}",
+        s"origination_uuid=$uniqueId"
+      ) ++
+        numberPresentation.asOriginateArgs ++
+        retries.map(_.asOriginateArgs).getOrElse(Nil)
+
+      s"${vars.asVarsString}$target &park()"
+    }
+  }
+
+  object Dial {
+
+    case class Retry(retries: Int = 1, sleep: FiniteDuration = 5 seconds) {
+      def asOriginateArgs: Seq[String] = {
+        Seq(
+          s"originate_retries=$retries",
+          s"originate_retry_sleep_ms=${sleep.toMillis}"
+        )
+      }
+    }
+    case class NumberPresentation(number: String, name: String) {
+      def asOriginateArgs: Seq[String] = {
+        Seq(
+          s"origination_caller_id_number=$number",
+          s"origination_caller_id_name=$name"
+        )
+      }
+    }
+
+    object NumberPresentation {
+      lazy val hidden: NumberPresentation =
+        NumberPresentation("anonymous", "anonymous")
+    }
   }
 
   final case object ConnectCommand extends FSCommand {
@@ -182,7 +269,10 @@ object CallCommands {
     *
     * @param command : String
     */
-  final case class CommandAsString(command: String, override val eventUuid: String) extends FSCommand {
+  final case class CommandAsString(
+      command: String,
+      override val eventUuid: String
+  ) extends FSCommand {
     override def toString: String = command
   }
 
@@ -196,7 +286,8 @@ object CallCommands {
     * @param events : List[EventName]
     */
   final case class SubscribeEvents(events: List[EventName]) extends FSCommand {
-    override def toString: String = s"event plain ${events.map(_.name).mkString(" ")}$MESSAGE_TERMINATOR"
+    override def toString: String =
+      s"event plain ${events.map(_.name).mkString(" ")}$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -223,8 +314,12 @@ object CallCommands {
     * @param events : Map[EventName, String] mapping of events and their value
     * @param config : ApplicationCommandConfig
     */
-  final case class Filter(events: Map[EventName, String], config: ApplicationCommandConfig) extends FSCommand {
-    override def toString: String = s"filter ${events.map { case (key, value) => s"$value ${key.name}" }.mkString(" ")}$MESSAGE_TERMINATOR"
+  final case class Filter(
+      events: Map[EventName, String],
+      config: ApplicationCommandConfig
+  ) extends FSCommand {
+    override def toString: String =
+      s"filter ${events.map { case (key, value) => s"$value ${key.name}" }.mkString(" ")}$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -236,8 +331,10 @@ object CallCommands {
     * @param uuid : Channel uuid to filter in
     * @param config : ApplicationCommandConfig
     */
-  final case class FilterUUId(uuid: String, config: ApplicationCommandConfig) extends FSCommand {
-    override def toString: String = s"filter Unique-ID ${uuid}$MESSAGE_TERMINATOR"
+  final case class FilterUUId(uuid: String, config: ApplicationCommandConfig)
+      extends FSCommand {
+    override def toString: String =
+      s"filter Unique-ID ${uuid}$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -250,8 +347,12 @@ object CallCommands {
     * @param events :Map[EventName, String] mapping of events and their value
     * @param config :ApplicationCommandConfig
     */
-  final case class DeleteFilter(events: Map[EventName, String], config: ApplicationCommandConfig) extends FSCommand {
-    override def toString: String = s"filter delete ${events.map { case (key, value) => s"$value ${key.name}" }.mkString(" ")}$MESSAGE_TERMINATOR"
+  final case class DeleteFilter(
+      events: Map[EventName, String],
+      config: ApplicationCommandConfig
+  ) extends FSCommand {
+    override def toString: String =
+      s"filter delete ${events.map { case (key, value) => s"$value ${key.name}" }.mkString(" ")}$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -264,10 +365,13 @@ object CallCommands {
     * @param uuid : Channel uuid to filter out
     * @param config :ApplicationCommandConfig
     */
-  final case class DeleteUUIdFilter(uuid: String, config: ApplicationCommandConfig) extends FSCommand {
-    override def toString: String = s"filter delete Unique-ID ${uuid}$MESSAGE_TERMINATOR"
+  final case class DeleteUUIdFilter(
+      uuid: String,
+      config: ApplicationCommandConfig
+  ) extends FSCommand {
+    override def toString: String =
+      s"filter delete Unique-ID ${uuid}$MESSAGE_TERMINATOR"
   }
-
 
   /**
     * Allows one channel to bridge itself to the a or b leg of another call. The remaining leg of the original call gets hungup
@@ -276,7 +380,8 @@ object CallCommands {
     * @param uuid   : String
     * @param config :ApplicationCommandConfig
     */
-  final case class Intercept(uuid: String, config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class Intercept(uuid: String, config: ApplicationCommandConfig)
+      extends FSExecuteApp {
     override val application: String = "intercept"
     override val args: String = uuid
   }
@@ -295,13 +400,19 @@ object CallCommands {
     * @param params : ReadParameters
     * @param config : ApplicationCommandConfig
     */
-  final case class Read(params: ReadParameters, config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class Read(
+      params: ReadParameters,
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
     override val application: String = "read"
     override val args: String = List(
-      params.min.toString, params.max.toString, params.soundFile,
-      params.variableName, params.timeout.toMillis.toString,
-      params.terminators.map(_.toString).mkString(","))
-      .mkString(" ")
+      params.min.toString,
+      params.max.toString,
+      params.soundFile,
+      params.variableName,
+      params.timeout.toMillis.toString,
+      params.terminators.map(_.toString).mkString(",")
+    ).mkString(" ")
   }
 
   /**
@@ -310,7 +421,10 @@ object CallCommands {
     * @param variableName : String variable name
     * @param config       : ApplicationCommandConfig
     */
-  final case class Phrase(variableName: String, config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class Phrase(
+      variableName: String,
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
     override val application: String = "phrase"
     override val args: String = "spell,${" + variableName + "}"
   }
@@ -322,9 +436,21 @@ object CallCommands {
     * To consume DTMFs, use the sleep_eat_digits variable.
     * Usage: <action application="sleep" data=<milliseconds>/>
     */
-  final case class Sleep(numberOfMillis: Duration, config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class Sleep(
+      numberOfMillis: Duration,
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
     override val application: String = "sleep"
     override val args: String = numberOfMillis.toMillis.toString
+  }
+
+  case class Hold(config: ApplicationCommandConfig) extends FSExecuteApp {
+    override val application: String = "hold"
+    override val args: String = ""
+  }
+  case class OffHold(config: ApplicationCommandConfig) extends FSExecuteApp {
+    override val application: String = "unhold"
+    override val args: String = ""
   }
 
   /**
@@ -332,7 +458,8 @@ object CallCommands {
     *
     * @param config : ApplicationCommandConfig
     */
-  final case class PreAnswer(config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class PreAnswer(config: ApplicationCommandConfig)
+      extends FSExecuteApp {
     override val application: String = s"pre_answer$MESSAGE_TERMINATOR"
   }
 
@@ -352,13 +479,17 @@ object CallCommands {
     *                      When omitted, the default value is 3 seconds
     * @param config        :ApplicationCommandConfig
     */
-  final case class Record(filePath: String,
-                          timeLimitSecs: Duration,
-                          silenceThresh: Duration,
-                          silenceHits: Option[Duration],
-                          config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class Record(
+      filePath: String,
+      timeLimitSecs: Duration,
+      silenceThresh: Duration,
+      silenceHits: Option[Duration],
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
     override val application: String = "record"
-    override val args: String = s"$filePath ${timeLimitSecs.toSeconds} ${silenceThresh.toSeconds}${silenceHits.fold("")(f => s" ${f.toSeconds.toString}")}"
+    override val args: String =
+      s"$filePath ${timeLimitSecs.toSeconds} ${silenceThresh.toSeconds}${silenceHits
+        .fold("")(f => s" ${f.toSeconds.toString}")}"
   }
 
   /**
@@ -368,7 +499,10 @@ object CallCommands {
     * @param filePathWithFormat : String file format like gsm,mp3,wav, ogg, etc
     * @param config             : ApplicationCommandConfig
     */
-  final case class RecordSession(filePathWithFormat: String, config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class RecordSession(
+      filePathWithFormat: String,
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
     override val application: String = "record_session"
     override val args: String = filePathWithFormat
   }
@@ -381,11 +515,14 @@ object CallCommands {
     * @param toneDuration : Option[Duration]
     * @param config       : ApplicationCommandConfig
     */
-  final case class SendDtmf(dtmfDigits: String,
-                            toneDuration: Option[Duration],
-                            config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class SendDtmf(
+      dtmfDigits: String,
+      toneDuration: Option[Duration],
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
     override val application: String = "send_dtmf"
-    override val args: String = s"$dtmfDigits${toneDuration.fold("")(f => s"@${f.toMillis.toString}")}"
+    override val args: String =
+      s"$dtmfDigits${toneDuration.fold("")(f => s"@${f.toMillis.toString}")}"
   }
 
   /**
@@ -395,8 +532,10 @@ object CallCommands {
     * @param filePath : String file name
     * @param config   : ApplicationCommandConfig
     */
-  final case class StopRecordSession(filePath: String,
-                                     config: ApplicationCommandConfig) extends FSExecuteApp {
+  final case class StopRecordSession(
+      filePath: String,
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
     override val application: String = "stop_record_session"
     override val args: String = filePath
   }
@@ -431,13 +570,17 @@ object CallCommands {
     * @param logLevel : String
     * @param config   : ApplicationCommandConfig
     */
-  final case class Log(logLevel: String, config: ApplicationCommandConfig) extends FSCommand {
+  final case class Log(logLevel: String, config: ApplicationCommandConfig)
+      extends FSCommand {
     override def toString: String = s"log $logLevel$MESSAGE_TERMINATOR"
   }
 
 }
 
-final case class CommandRequest(command: FSCommand, queueOfferResult: Future[QueueOfferResult])
+final case class CommandRequest(
+    command: FSCommand,
+    queueOfferResult: Future[QueueOfferResult]
+)
 
 sealed trait DialType extends Product with Serializable {
   val separator: String
@@ -457,7 +600,6 @@ case object OneAtATime extends DialType {
   override val separator: String = "|"
 }
 
-
 /**
   *
   * @param min          Minimum number of digits to fetch.
@@ -467,9 +609,11 @@ case object OneAtATime extends DialType {
   * @param timeout      Number of milliseconds to wait on each digit
   * @param terminators  Digits used to end input if less than <min> digits have been pressed. (Typically '#')
   */
-final case class ReadParameters(min: Int,
-                                max: Int,
-                                soundFile: String,
-                                variableName: String,
-                                timeout: Duration,
-                                terminators: List[Char])
+final case class ReadParameters(
+    min: Int,
+    max: Int,
+    soundFile: String,
+    variableName: String,
+    timeout: Duration,
+    terminators: List[Char]
+)
