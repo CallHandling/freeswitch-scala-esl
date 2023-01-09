@@ -90,13 +90,21 @@ abstract class FSConnection extends StrictLogging {
   private[this] val eventMap: mutable.Map[String, CommandToQueue] =
     mutable.Map.empty
 
-  private[this] val decider: Supervision.Decider = {
-    case _: NullPointerException => {
-      adapter.error(logMarker, "NullPointerException in Supervisor Resume")
+  private[this] def decider(origin: String): Supervision.Decider = {
+    case ne: NullPointerException => {
+      adapter.error(
+        logMarker,
+        ne,
+        s"NullPointerException in FS Connection Flow @$origin; will Resume"
+      )
       Supervision.Resume
     }
     case ex => {
-      adapter.error(logMarker, ex, "Exception in Supervisor Stop")
+      adapter.error(
+        logMarker,
+        ex,
+        s"Exception in FS Connection Flow @$origin; will Stop"
+      )
       Supervision.Stop
     }
   }
@@ -106,31 +114,35 @@ abstract class FSConnection extends StrictLogging {
       .queue[FSCommand](50, OverflowStrategy.fail)
 
     {
-      if (enableDebugLogs) {
-        sourceStage1
-          .logWithMarker(
-            name = "esl-freeswitch-out",
-            e =>
-              LogMarker(
-                name = "esl-freeswitch-out",
-                properties = Map("element" -> e, "connection" -> connectionId)
-              )
-          )
-          .addAttributes(
-            Attributes.logLevels(
-              onElement = Attributes.LogLevels.Info,
-              onFinish = Attributes.LogLevels.Info,
-              onFailure = Attributes.LogLevels.Error
+      sourceStage1
+        .logWithMarker(
+          name = "esl-freeswitch-out",
+          e =>
+            LogMarker(
+              name = "esl-freeswitch-out",
+              properties = Map("element" -> e, "connection" -> connectionId)
             )
+        )
+        .addAttributes(
+          Attributes.logLevels(
+            onElement = if (enableDebugLogs) {
+              Attributes.LogLevels.Debug
+            } else {
+              Attributes.LogLevels.Off
+            },
+            onFinish = Attributes.LogLevels.Info,
+            onFailure = Attributes.LogLevels.Error
           )
-      } else sourceStage1
+        )
     }.recover {
         case e => {
           adapter.error(logMarker, e.getMessage, e)
           throw e
         }
       }
-      .addAttributes(ActorAttributes.supervisionStrategy(decider))
+      .addAttributes(
+        ActorAttributes.supervisionStrategy(decider("fs-command-queue"))
+      )
       .toMat(Sink.asPublisher(false))(Keep.both)
       .run()
   }
@@ -142,7 +154,9 @@ abstract class FSConnection extends StrictLogging {
   private[this] val downStreamFlow: Flow[ByteString, FSData, _] =
     Flow[ByteString]
       .via(killSwitch.flow)
-      .addAttributes(ActorAttributes.supervisionStrategy(decider))
+      .addAttributes(
+        ActorAttributes.supervisionStrategy(decider("fs-events-receive"))
+      )
       .statefulMapConcat(() => {
         var unParsedBuffer: String = ""
         data => {
@@ -190,12 +204,18 @@ abstract class FSConnection extends StrictLogging {
       queue.watchCompletion(),
       Source
         .fromPublisher(source)
-        .addAttributes(ActorAttributes.supervisionStrategy(decider)),
+        .addAttributes(
+          ActorAttributes.supervisionStrategy(decider("bidi-fs-command"))
+        ),
       BidiFlow.fromFlows(
         downStreamFlow
-          .addAttributes(ActorAttributes.supervisionStrategy(decider)),
+          .addAttributes(
+            ActorAttributes.supervisionStrategy(decider("bidi-fs-events"))
+          ),
         upStreamFlow
-          .addAttributes(ActorAttributes.supervisionStrategy(decider))
+          .addAttributes(
+            ActorAttributes.supervisionStrategy(decider("bidi-fs-command-2"))
+          )
       )
     )
   }
@@ -384,7 +404,7 @@ abstract class FSConnection extends StrictLogging {
           )
         }
       })
-      .addAttributes(ActorAttributes.supervisionStrategy(decider))
+      .addAttributes(ActorAttributes.supervisionStrategy(decider("fs-init")))
       .toMat(futureSink)(Keep.right)
 
   }

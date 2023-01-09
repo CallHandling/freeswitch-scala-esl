@@ -188,10 +188,11 @@ class OutboundServer(
           val (upStreamCompletion, source, protocol) = flow(fsConnection)
 
           val decider: Supervision.Decider = {
-            case _: NullPointerException => {
+            case ne: NullPointerException => {
               adapter.error(
                 fsConnection.logMarker,
-                "NullPointerException in Supervisor Resume"
+                ne,
+                "NullPointerException in FS Server Flow; will Resume"
               )
               Supervision.Resume
             }
@@ -199,7 +200,7 @@ class OutboundServer(
               adapter.error(
                 fsConnection.logMarker,
                 ex,
-                "Exception in Supervisor Stop"
+                "Exception in FS Server Flow; will Stop"
               )
               Supervision.Stop
             }
@@ -217,29 +218,30 @@ class OutboundServer(
               .buffer(1000, OverflowStrategy.fail)
 
             {
-              if (enableDebugLogs) {
-                flowStage1
-                  .logWithMarker(
-                    name = "esl-freeswitch-in",
-                    e =>
-                      LogMarker(
-                        name = "esl-freeswitch-in",
-                        properties = Map(
-                          "element" -> e,
-                          "connection" -> fsConnection.getConnectionId
-                        )
+              flowStage1
+                .logWithMarker(
+                  name = "esl-freeswitch-in",
+                  e =>
+                    LogMarker(
+                      name = "esl-freeswitch-in",
+                      properties = Map(
+                        "element" -> e,
+                        "connection" -> fsConnection.getConnectionId
                       )
-                  )
-                  .addAttributes(
-                    Attributes.logLevels(
-                      onElement = Attributes.LogLevels.Info,
-                      onFinish = Attributes.LogLevels.Info,
-                      onFailure = Attributes.LogLevels.Error
                     )
+                )
+                .addAttributes(
+                  Attributes.logLevels(
+                    onElement = if (enableDebugLogs) {
+                      Attributes.LogLevels.Debug
+                    } else {
+                      Attributes.LogLevels.Off
+                    },
+                    onFinish = Attributes.LogLevels.Info,
+                    onFailure = Attributes.LogLevels.Error
                   )
-              } else {
-                flowStage1
-              }
+                )
+
             }.addAttributes(ActorAttributes.supervisionStrategy(decider))
               .runWith(source, sink)
           }
