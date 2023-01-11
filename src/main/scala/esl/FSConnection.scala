@@ -366,39 +366,33 @@ abstract class FSConnection extends StrictLogging {
               isLingering = ling._2
               ling._1
             } else {
-              if (hasConnected && isLingering) {
-                val (messagesWithSameId, messagesWithDifferentId) =
-                  fSData.fsMessages.partition { message =>
-                    message.headers
-                      .get(HeaderNames.uniqueId)
-                      .fold(true)(x =>
-                        x == getConnectionId || getOriginatedCallIds.contains(x)
-                      )
-                  }
-                if (messagesWithDifferentId.nonEmpty) {
-                  adapter.warning(
-                    logMarker,
-                    s"""CALL $getConnectionId $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other calls
+              val (messagesWithSameId, messagesWithDifferentId) = {
+                fSData.fsMessages.partition { message =>
+                  message.headers
+                    .get(HeaderNames.uniqueId)
+                    .fold(true)(uniqueIdHeaderValue =>
+                      uniqueIdHeaderValue == getConnectionId || getOriginatedCallIds
+                        .contains(uniqueIdHeaderValue)
+                    )
+                }
+              }
+              if (messagesWithDifferentId.nonEmpty) {
+                adapter.warning(
+                  logMarker,
+                  s"""CALL $getConnectionId $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other calls
                        |getOriginatedCallIds = ${getOriginatedCallIds
-                      .mkString("[", ",", "]")}
+                    .mkString("[", ",", "]")}
                        |other call ids ${messagesWithDifferentId
-                      .map(_.headers(HeaderNames.uniqueId))
-                      .mkString("[", ",", "]")}
+                    .map(_.headers(HeaderNames.uniqueId))
+                    .mkString("[", ",", "]")}
                        |
                        |------  messages below -----
                        |${messagesWithDifferentId
-                      .map(freeSwitchMsgToString)
-                      .mkString("\n----")}""".stripMargin
-                  )
-                }
-                fSData.copy(fsMessages = messagesWithSameId)
-              } else {
-                fSData.copy(fsMessages =
-                  fSData.fsMessages.filter(m =>
-                    m.contentType == ContentTypes.commandReply
-                  )
+                    .map(freeSwitchMsgToString)
+                    .mkString("\n----")}""".stripMargin
                 )
               }
+              fSData.copy(fsMessages = messagesWithSameId)
             }
           //Send every message
           List(
