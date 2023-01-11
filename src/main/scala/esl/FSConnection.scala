@@ -114,26 +114,24 @@ abstract class FSConnection extends StrictLogging {
       .queue[FSCommand](50, OverflowStrategy.fail)
 
     {
-      sourceStage1
-        .logWithMarker(
-          name = "esl-freeswitch-out",
-          e =>
-            LogMarker(
-              name = "esl-freeswitch-out",
-              properties = Map("element" -> e, "connection" -> connectionId)
-            )
-        )
-        .addAttributes(
-          Attributes.logLevels(
-            onElement = if (enableDebugLogs) {
-              Attributes.LogLevels.Debug
-            } else {
-              Attributes.LogLevels.Off
-            },
-            onFinish = Attributes.LogLevels.Info,
-            onFailure = Attributes.LogLevels.Error
+      if (enableDebugLogs) {
+        sourceStage1
+          .logWithMarker(
+            name = "esl-freeswitch-out",
+            e =>
+              LogMarker(
+                name = "esl-freeswitch-out",
+                properties = Map("element" -> e, "connection" -> connectionId)
+              )
           )
-        )
+          .addAttributes(
+            Attributes.logLevels(
+              onElement = Attributes.LogLevels.Info,
+              onFinish = Attributes.LogLevels.Info,
+              onFailure = Attributes.LogLevels.Error
+            )
+          )
+      } else sourceStage1
     }.recover {
         case e => {
           adapter.error(logMarker, e.getMessage, e)
@@ -395,7 +393,11 @@ abstract class FSConnection extends StrictLogging {
                 }
                 fSData.copy(fsMessages = messagesWithSameId)
               } else {
-                fSData.copy(fsMessages = fSData.fsMessages.filter(m => m.contentType == ContentTypes.commandReply))
+                fSData.copy(fsMessages =
+                  fSData.fsMessages.filter(m =>
+                    m.contentType == ContentTypes.commandReply
+                  )
+                )
               }
             }
           //Send every message
