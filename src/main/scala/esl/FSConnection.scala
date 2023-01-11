@@ -359,10 +359,10 @@ abstract class FSConnection extends StrictLogging {
               con._1
             } else if (
               cmdReplies.nonEmpty && lingering && !isLingering && !isConnect && cmdReplies
-                .count {
+                .exists {
                   case a: CommandReply =>
                     a.replyText.getOrElse("") == "+OK will linger"
-                } > 0
+                }
             ) {
               val ling = doLinger(fSData, isLingering)
               isLingering = ling._2
