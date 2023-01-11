@@ -351,6 +351,7 @@ abstract class FSConnection extends StrictLogging {
           val isConnect = cmdReplies.foldLeft(false)((_, b) =>
             b.headers.contains(HeaderNames.uniqueId)
           )
+
           val updatedFSData =
             if (cmdReplies.nonEmpty && !hasConnected && isConnect) {
               val con = connectToFS(fSData, hasConnected)
@@ -385,15 +386,17 @@ abstract class FSConnection extends StrictLogging {
                        |other call ids ${messagesWithDifferentId
                       .map(_.headers(HeaderNames.uniqueId))
                       .mkString("[", ",", "]")}
-                      |
-                      |------  messages below -----
-                      |${messagesWithDifferentId
+                       |
+                       |------  messages below -----
+                       |${messagesWithDifferentId
                       .map(freeSwitchMsgToString)
                       .mkString("\n----")}""".stripMargin
                   )
                 }
                 fSData.copy(fsMessages = messagesWithSameId)
-              } else fSData
+              } else {
+                fSData.copy(fsMessages = fSData.fsMessages.filter(m => m.contentType == ContentTypes.commandReply))
+              }
             }
           //Send every message
           List(
