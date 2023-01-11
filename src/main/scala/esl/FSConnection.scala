@@ -406,7 +406,7 @@ abstract class FSConnection extends StrictLogging {
               ling._1
 
             } else if (
-              cmdReplies.nonEmpty && cmdReplies.exists {
+              !isFiltering && cmdReplies.nonEmpty && cmdReplies.exists {
                 case a: CommandReply =>
                   a.replyText.fold(false)(replyTxt =>
                     replyTxt.startsWith("+OK filter added") && replyTxt
