@@ -87,8 +87,7 @@ abstract class FSConnection extends StrictLogging {
   private[this] val commandQueue: mutable.Queue[Promise[CommandReply]] =
     mutable.Queue.empty
 
-  private[this] val eventMap: mutable.Map[String, CommandToQueue] =
-    mutable.Map.empty
+  private[this] var eventMap: Map[String, CommandToQueue] = Map.empty
 
   private[this] def decider(origin: String): Supervision.Decider = {
     case ne: NullPointerException => {
@@ -489,15 +488,37 @@ abstract class FSConnection extends StrictLogging {
               eventMessage.eventName.contains(EventNames.ChannelExecuteComplete)
             ) {
               commandToQueue.executeComplete.complete(Success(eventMessage))
-              eventMap.remove(commandToQueue.command.eventUuid)
-            } else {
-              adapter.warning(
+              eventMap = eventMap - commandToQueue.command.eventUuid
+              adapter.info(
                 logMarker,
-                s"""Unable to handle Command (unexpected eventName header) for app id $appId
+                s"""handleFSEventMessage for app id $appId Removing entry
                    |>> TYPE
                    |EVENT ${eventMessage.eventName.getOrElse("NA")}
                    |>> HEADERS
-                   |${eventMessage.headers.map(h => h._1 + " : " + h._2).mkString(space, "\n" + space, "")}
+                   |${eventMessage.headers
+                  .map(h => h._1 + " : " + h._2)
+                  .mkString(space, "\n" + space, "")}
+                   |>> BODY
+                   |${eventMessage.body}
+                   |>> MAP is below
+                   |${eventMap
+                  .map({ item =>
+                    s"""appId: ${item._1}
+                         |command
+                         |${item._2.command}""".stripMargin
+                  })
+                  .mkString("\n")}""".stripMargin
+              )
+            } else {
+              adapter.warning(
+                logMarker,
+                s"""handleFSEventMessage for app id $appId Unable to handle Command (unexpected eventName header)
+                   |>> TYPE
+                   |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                   |>> HEADERS
+                   |${eventMessage.headers
+                  .map(h => h._1 + " : " + h._2)
+                  .mkString(space, "\n" + space, "")}
                    |>> BODY
                    |${eventMessage.body}""".stripMargin
               )
@@ -506,11 +527,13 @@ abstract class FSConnection extends StrictLogging {
           case _ => {
             adapter.warning(
               logMarker,
-              s"""Unable to find Command in look up for app id $appId
+              s"""handleFSEventMessage for app id $appId Unable to find Command in look up
                  |>> TYPE
                  |EVENT ${eventMessage.eventName}
                  |>> HEADERS
-                 |${eventMessage.headers.map(h => h._1 + " : " + h._2).mkString(space, "\n" + space, "")}
+                 |${eventMessage.headers
+                .map(h => h._1 + " : " + h._2)
+                .mkString(space, "\n" + space, "")}
                  |>> BODY
                  |${eventMessage.body}""".stripMargin
             )
@@ -518,13 +541,15 @@ abstract class FSConnection extends StrictLogging {
         }
       }
       case _ => {
-        adapter.warning(
+        adapter.debug(
           logMarker,
-          s"""Unable to find application id header for event message
+          s"""handleFSEventMessage Unable to find application id header for event message
              |>> TYPE
              |EVENT ${eventMessage.eventName}
              |>> HEADERS
-             |${eventMessage.headers.map(h => h._1 + " : " + h._2).mkString(space, "\n" + space, "")}
+             |${eventMessage.headers
+            .map(h => h._1 + " : " + h._2)
+            .mkString(space, "\n" + space, "")}
              |>> BODY
              |${eventMessage.body}""".stripMargin
         )
@@ -582,7 +607,22 @@ abstract class FSConnection extends StrictLogging {
         val (commandReply, commandToQueue, cmdResponse) =
           buildCommandAndResponse(command)
         commandQueue.enqueue(commandReply)
-        eventMap += command.eventUuid -> commandToQueue
+        val appId = command.eventUuid
+        eventMap = eventMap.updated(appId, commandToQueue)
+        adapter.info(
+          logMarker,
+          s"""publishCommand for app id $appId Added to lookup
+             |>> COMMAND
+             |$command
+             |>> MAP is now
+             |${eventMap
+            .map({ item =>
+              s"""appId: ${item._1}
+               |command
+               |${item._2.command}""".stripMargin
+            })
+            .mkString("\n")}""".stripMargin
+        )
         onCommandCallbacks
           .foreach(
             _.lift(
