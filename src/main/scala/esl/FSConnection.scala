@@ -531,17 +531,6 @@ abstract class FSConnection extends StrictLogging {
       }
     }
 
-    eventMessage.applicationUuid.flatMap(eventMap.lift).foreach {
-      commandToQueue =>
-        if (eventMessage.eventName.contains(EventNames.ChannelExecute))
-          commandToQueue.executeEvent.complete(Success(eventMessage))
-        else if (
-          eventMessage.eventName.contains(EventNames.ChannelExecuteComplete)
-        ) {
-          commandToQueue.executeComplete.complete(Success(eventMessage))
-          eventMap.remove(commandToQueue.command.eventUuid)
-        }
-    }
     eventMessage
   }
 
