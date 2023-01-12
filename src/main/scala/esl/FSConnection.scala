@@ -24,7 +24,7 @@ import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
 import akka.util.ByteString
 import esl.FSConnection.{FSData, _}
 import esl.domain.CallCommands._
-import esl.domain.EventNames.EventName
+import esl.domain.EventNames.{EventName, events}
 import esl.domain.HangupCauses.HangupCause
 import esl.domain.{ApplicationCommandConfig, FSMessage, _}
 import esl.parser.{DefaultParser, Parser}
@@ -113,26 +113,27 @@ abstract class FSConnection extends StrictLogging {
     val sourceStage1 = Source
       .queue[FSCommand](50, OverflowStrategy.fail)
 
-    {
-      if (enableDebugLogs) {
-        sourceStage1
-          .logWithMarker(
-            name = "esl-freeswitch-out",
-            e =>
-              LogMarker(
-                name = "esl-freeswitch-out",
-                properties = Map("element" -> e, "connection" -> connectionId)
-              )
+    sourceStage1
+      .logWithMarker(
+        name = "esl-freeswitch-outstream",
+        e =>
+          LogMarker(
+            name = "esl-freeswitch-outstream",
+            properties = Map("element" -> e, "connection" -> connectionId)
           )
-          .addAttributes(
-            Attributes.logLevels(
-              onElement = Attributes.LogLevels.Info,
-              onFinish = Attributes.LogLevels.Info,
-              onFailure = Attributes.LogLevels.Error
-            )
-          )
-      } else sourceStage1
-    }.recover {
+      )
+      .addAttributes(
+        Attributes.logLevels(
+          onElement = if (enableDebugLogs) {
+            Attributes.LogLevels.Debug
+          } else {
+            Attributes.LogLevels.Off
+          },
+          onFinish = Attributes.LogLevels.Info,
+          onFailure = Attributes.LogLevels.Error
+        )
+      )
+      .recover {
         case e => {
           adapter.error(logMarker, e.getMessage, e)
           throw e
@@ -467,6 +468,8 @@ abstract class FSConnection extends StrictLogging {
     cmdReply
   }
 
+  private val space = "    "
+
   /**
     * This will get an element from `eventMap` map by event's uuid
     * Complete promises after receiving `CHANNEL_EXECUTE` and `CHANNEL_EXECUTE_COMPLETE` events
@@ -475,6 +478,59 @@ abstract class FSConnection extends StrictLogging {
     * @return EventMessage
     */
   private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
+
+    eventMessage.applicationUuid match {
+      case Some(appId) => {
+        eventMap.get(appId) match {
+          case Some(commandToQueue) => {
+            if (eventMessage.eventName.contains(EventNames.ChannelExecute))
+              commandToQueue.executeEvent.complete(Success(eventMessage))
+            else if (
+              eventMessage.eventName.contains(EventNames.ChannelExecuteComplete)
+            ) {
+              commandToQueue.executeComplete.complete(Success(eventMessage))
+              eventMap.remove(commandToQueue.command.eventUuid)
+            } else {
+              adapter.warning(
+                logMarker,
+                s"""Unable to handle Command (unexpected eventName header) for app id $appId
+                   |>> TYPE
+                   |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                   |>> HEADERS
+                   |${eventMessage.headers.map(h => h._1 + " : " + h._2).mkString(space, "\n" + space, "")}
+                   |>> BODY
+                   |${eventMessage.body}""".stripMargin
+              )
+            }
+          }
+          case _ => {
+            adapter.warning(
+              logMarker,
+              s"""Unable to find Command in look up for app id $appId
+                 |>> TYPE
+                 |EVENT ${eventMessage.eventName}
+                 |>> HEADERS
+                 |${eventMessage.headers.map(h => h._1 + " : " + h._2).mkString(space, "\n" + space, "")}
+                 |>> BODY
+                 |${eventMessage.body}""".stripMargin
+            )
+          }
+        }
+      }
+      case _ => {
+        adapter.warning(
+          logMarker,
+          s"""Unable to find application id header for event message
+             |>> TYPE
+             |EVENT ${eventMessage.eventName}
+             |>> HEADERS
+             |${eventMessage.headers.map(h => h._1 + " : " + h._2).mkString(space, "\n" + space, "")}
+             |>> BODY
+             |${eventMessage.body}""".stripMargin
+        )
+      }
+    }
+
     eventMessage.applicationUuid.flatMap(eventMap.lift).foreach {
       commandToQueue =>
         if (eventMessage.eventName.contains(EventNames.ChannelExecute))

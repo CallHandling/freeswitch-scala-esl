@@ -217,31 +217,30 @@ class OutboundServer(
               }
               .buffer(1000, OverflowStrategy.fail)
 
-            {
-              if (enableDebugLogs) {
-                flowStage1
-                  .logWithMarker(
-                    name = "esl-freeswitch-in",
-                    e =>
-                      LogMarker(
-                        name = "esl-freeswitch-in",
-                        properties = Map(
-                          "element" -> e,
-                          "connection" -> fsConnection.getConnectionId
-                        )
-                      )
-                  )
-                  .addAttributes(
-                    Attributes.logLevels(
-                      onElement = Attributes.LogLevels.Info,
-                      onFinish = Attributes.LogLevels.Info,
-                      onFailure = Attributes.LogLevels.Error
+            flowStage1
+              .logWithMarker(
+                name = "esl-freeswitch-ingest",
+                e =>
+                  LogMarker(
+                    name = "esl-freeswitch-ingest",
+                    properties = Map(
+                      "element" -> e,
+                      "connection" -> fsConnection.getConnectionId
                     )
                   )
-              } else {
-                flowStage1
-              }
-            }.addAttributes(ActorAttributes.supervisionStrategy(decider))
+              )
+              .addAttributes(
+                Attributes.logLevels(
+                  onElement = if (enableDebugLogs) {
+                    Attributes.LogLevels.Debug
+                  } else {
+                    Attributes.LogLevels.Off
+                  },
+                  onFinish = Attributes.LogLevels.Info,
+                  onFailure = Attributes.LogLevels.Error
+                )
+              )
+              .addAttributes(ActorAttributes.supervisionStrategy(decider))
               .runWith(source, sink)
           }
 
