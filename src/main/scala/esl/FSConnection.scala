@@ -234,7 +234,7 @@ abstract class FSConnection extends StrictLogging {
       fsConnection: FS,
       fun: Future[FSSocket[FS]] => Sink[FSData, Mat],
       timeout: FiniteDuration,
-      lingering: Boolean
+      needToLinger: Boolean
   ) = {
     lazy val timeoutFuture =
       after(duration = timeout, using = system.scheduler) {
@@ -249,12 +249,6 @@ abstract class FSConnection extends StrictLogging {
       Future
         .firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
         .map(fsSocket => {
-          fsSocket.fsConnection.setConnectionId(
-            fsSocket.channelData.headers.getOrElse(
-              HeaderNames.uniqueId,
-              fsSocket.fsConnection.getConnectionId
-            )
-          )
           fun(Future.successful(fsSocket))
         })
         .transform({
@@ -274,10 +268,14 @@ abstract class FSConnection extends StrictLogging {
         case ::(command: CommandReply, _)
             if (command.headers.contains(HeaderNames.uniqueId)) =>
           if (command.success) {
-            fsConnectionPromise.complete(
-              Success(FSSocket(fsConnection, ChannelData(command.headers)))
+            val fsSocket = FSSocket(fsConnection, ChannelData(command.headers))
+            fsSocket.fsConnection.setConnectionId(
+              fsSocket.channelData.headers(HeaderNames.uniqueId)
             )
-            if (lingering) publishNonMappingCommand(LingerCommand)
+            fsConnectionPromise.complete(
+              Success(fsSocket)
+            )
+            if (needToLinger) publishNonMappingCommand(LingerCommand)
             (
               fsData
                 .copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),
@@ -345,7 +343,8 @@ abstract class FSConnection extends StrictLogging {
         var hasConnected: Boolean = false
         var isLingering: Boolean = false
         var isFiltering: Boolean = false
-        val buffer: mutable.Buffer[FSData] = mutable.Buffer.empty[FSData]
+        val buffer: mutable.ListBuffer[FSData] =
+          mutable.ListBuffer.empty[FSData]
 
         def filterFSMessages(fSData: FSData): FSData = {
           val (messagesWithSameId, messagesWithDifferentId) = {
@@ -362,40 +361,46 @@ abstract class FSConnection extends StrictLogging {
             adapter.warning(
               logMarker,
               s"""CALL $getConnectionId $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other calls
-                 |getOriginatedCallIds = ${
-                getOriginatedCallIds
-                  .mkString("[", ",", "]")
-              }
-                 |other call ids ${
-                messagesWithDifferentId
-                  .map(_.headers(HeaderNames.uniqueId))
-                  .mkString("[", ",", "]")
-              }
+                 |getOriginatedCallIds = ${getOriginatedCallIds
+                .mkString("[", ",", "]")}
+                 |other call ids ${messagesWithDifferentId
+                .map(_.headers(HeaderNames.uniqueId))
+                .mkString("[", ",", "]")}
                  |
                  |------  messages below -----
-                 |${
-                messagesWithDifferentId
-                  .map(freeSwitchMsgToString)
-                  .mkString("\n----")
-              }""".stripMargin
+                 |${messagesWithDifferentId
+                .map(freeSwitchMsgToString)
+                .mkString("\n----")}""".stripMargin
             )
           }
           fSData.copy(fsMessages = messagesWithSameId)
         }
 
         fSData => {
-          val cmdReplies = getCmdReplies(fSData)
-          val isConnect = cmdReplies.foldLeft(false)((_, b) =>
+          lazy val cmdReplies = getCmdReplies(fSData)
+          lazy val isConnect = cmdReplies.foldLeft(false)((_, b) =>
             b.headers.contains(HeaderNames.uniqueId)
           )
 
           val updatedFSData = {
-            if (cmdReplies.nonEmpty && !hasConnected && isConnect) {
+            if (!hasConnected && !isConnect) {
+              buffer.append(fSData)
+              fSData.copy(fsMessages = Nil)
+            } else if (!hasConnected && isConnect) {
               val con = connectToFS(fSData, hasConnected)
               hasConnected = con._2
-              con._1
+              if (hasConnected) {
+                val allMessages = fSData.copy(fsMessages =
+                  buffer.flatMap(_.fsMessages).toList ++ fSData.fsMessages
+                )
+                buffer.clear()
+                filterFSMessages(allMessages)
+              } else {
+                buffer.append(con._1)
+                fSData.copy(fsMessages = Nil)
+              }
             } else if (
-              cmdReplies.nonEmpty && lingering && !isLingering && !isConnect && cmdReplies
+              needToLinger && !isLingering && !isConnect && cmdReplies
                 .exists {
                   case a: CommandReply =>
                     a.replyText.getOrElse("") == "+OK will linger"
@@ -403,32 +408,9 @@ abstract class FSConnection extends StrictLogging {
             ) {
               val ling = doLinger(fSData, isLingering)
               isLingering = ling._2
-              ling._1
-
-            } else if (
-              !isFiltering && cmdReplies.nonEmpty && cmdReplies.exists {
-                case a: CommandReply =>
-                  a.replyText.fold(false)(replyTxt =>
-                    replyTxt.startsWith("+OK filter added") && replyTxt
-                      .contains(getConnectionId)
-                  )
-              }
-            ) {
-              isFiltering = true
-              //de buffer
-              val allMessages = fSData.copy(fsMessages =
-                buffer.flatMap(_.fsMessages).toList ++ fSData.fsMessages
-              )
-              buffer.clear()
-              filterFSMessages(allMessages)
+              filterFSMessages(ling._1)
             } else {
-              if (!isFiltering) {
-                //do buffering
-                buffer.append(fSData)
-                fSData.copy(fsMessages = Nil)
-              } else {
-                filterFSMessages(fSData)
-              }
+              filterFSMessages(fSData)
             }
           }
           List(
