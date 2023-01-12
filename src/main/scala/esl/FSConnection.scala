@@ -87,7 +87,9 @@ abstract class FSConnection extends StrictLogging {
   private[this] val commandQueue: mutable.Queue[Promise[CommandReply]] =
     mutable.Queue.empty
 
-  private[this] var eventMap: Map[String, CommandToQueue] = Map.empty
+  private[this] val eventMap
+      : scala.collection.concurrent.Map[String, CommandToQueue] =
+    scala.collection.concurrent.TrieMap.empty[String, CommandToQueue]
 
   private[this] def decider(origin: String): Supervision.Decider = {
     case ne: NullPointerException => {
@@ -488,7 +490,7 @@ abstract class FSConnection extends StrictLogging {
               eventMessage.eventName.contains(EventNames.ChannelExecuteComplete)
             ) {
               commandToQueue.executeComplete.complete(Success(eventMessage))
-              eventMap = eventMap - commandToQueue.command.eventUuid
+              eventMap.remove(commandToQueue.command.eventUuid)
               adapter.info(
                 logMarker,
                 s"""handleFSEventMessage for app id $appId Removing entry
@@ -608,7 +610,7 @@ abstract class FSConnection extends StrictLogging {
           buildCommandAndResponse(command)
         commandQueue.enqueue(commandReply)
         val appId = command.eventUuid
-        eventMap = eventMap.updated(appId, commandToQueue)
+        eventMap.put(appId, commandToQueue)
         adapter.info(
           logMarker,
           s"""publishCommand for app id $appId Added to lookup
