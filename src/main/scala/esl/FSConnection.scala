@@ -76,7 +76,8 @@ abstract class FSConnection extends StrictLogging {
     onCommandCallbacks = onCommandCallbacks :+ partialFunction
   }
 
-  def logMarker = LogMarker("hubbub-esl-fs", Map("CALL-ID" -> getConnectionId))
+  def logMarker =
+    LogMarker("hubbub-esl-fs", Map("FS-INTERFACE-ID" -> getConnectionId))
 
   private[this] val killSwitch =
     KillSwitches.shared("kill-" + getConnectionId)
@@ -232,9 +233,10 @@ abstract class FSConnection extends StrictLogging {
     * @return Sink[List[T], NotUsed]
     */
   def init[FS <: FSConnection, Mat](
+      callId: String,
       fsConnectionPromise: Promise[FSSocket[FS]],
       fsConnection: FS,
-      fun: Future[FSSocket[FS]] => Sink[FSData, Mat],
+      fun: (String, Future[FSSocket[FS]]) => Sink[FSData, Mat],
       timeout: FiniteDuration,
       needToLinger: Boolean
   ) = {
@@ -251,14 +253,14 @@ abstract class FSConnection extends StrictLogging {
       Future
         .firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
         .map(fsSocket => {
-          fun(Future.successful(fsSocket))
+          fun(callId, Future.successful(fsSocket))
         })
         .transform({
           case failure @ Failure(ex) =>
             adapter.error(
               logMarker,
               ex,
-              "About to shutdown due to exception in Future sink"
+              s"CALL ${callId} About to shutdown due to exception in Future sink"
             )
             kill
             failure
@@ -286,12 +288,12 @@ abstract class FSConnection extends StrictLogging {
           } else {
             adapter.error(
               logMarker,
-              s"Socket failed to make connection with an error: ${command.errorMessage}"
+              s"CALL ${callId}Socket failed to make connection with an error: ${command.errorMessage}"
             )
             fsConnectionPromise.complete(
               Failure(
                 new Exception(
-                  s"Socket failed to make connection with an error: ${command.errorMessage}"
+                  s"CALL ${callId}Socket failed to make connection with an error: ${command.errorMessage}"
                 )
               )
             )
@@ -306,7 +308,7 @@ abstract class FSConnection extends StrictLogging {
         case ::(command: CommandReply, _) =>
           adapter.info(
             logMarker,
-            s"Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}"
+            s"CALL ${callId} Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}"
           )
           if (command.success) {
             (
@@ -362,7 +364,7 @@ abstract class FSConnection extends StrictLogging {
           if (messagesWithDifferentId.nonEmpty) {
             adapter.warning(
               logMarker,
-              s"""CALL $getConnectionId $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other calls
+              s"""CALL $callId FS-INTERFACE-ID $getConnectionId $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other calls
                  |getOriginatedCallIds = ${getOriginatedCallIds
                 .mkString("[", ",", "]")}
                  |other call ids ${messagesWithDifferentId
