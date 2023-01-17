@@ -28,7 +28,7 @@ import akka.stream.{
   Supervision
 }
 import akka.stream.scaladsl.Tcp.IncomingConnection
-import akka.stream.scaladsl.{BidiFlow, Framing, Sink, Source, Tcp}
+import akka.stream.scaladsl.{BidiFlow, Framing, Keep, Sink, Source, Tcp}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
 import com.typesafe.config.Config
@@ -167,7 +167,7 @@ class OutboundServer(
       ) => Sink[FSData, Mat],
       onFsConnectionStart: OutboundServer.OnConnectionCallBack[Mat] =
         OutboundServer.OnConnectionCallBack.noop
-  ): Future[Done] =
+  ): Future[Tcp.ServerBinding] =
     server(fun, fsConnection => fsConnection.handler(), onFsConnectionStart)
 
   /** This function will start a tcp server for given sink,source and flow.
@@ -190,130 +190,134 @@ class OutboundServer(
           BidiFlow[ByteString, FSData, T, ByteString, NotUsed]
       ),
       onFsConnectionStart: OutboundServer.OnConnectionCallBack[Mat1]
-  ): Future[Done] = {
-    Tcp()
-      .bind(address, port, backlog = 1000, idleTimeout = 20 seconds)
-      .runForeach { connection =>
-        val fsConnection = OutboundFSConnection(enableDebugLogs)
-        fsConnection.connect().map { _ =>
-          val callId = UUID.randomUUID().toString
+  ): Future[Tcp.ServerBinding] = {
 
-          lazy val sink = fsConnection.init(
-            callId,
-            Promise[FSSocket[OutboundFSConnection]](),
-            fsConnection,
-            fun,
-            timeout,
-            linger
-          )
+    val sink = Sink.foreach[IncomingConnection] { connection =>
+      val fsConnection = OutboundFSConnection(enableDebugLogs)
+      fsConnection.connect().map { _ =>
+        val callId = UUID.randomUUID().toString
 
-          val (upStreamCompletion, source, protocol) = flow(fsConnection)
+        lazy val sink = fsConnection.init(
+          callId,
+          Promise[FSSocket[OutboundFSConnection]](),
+          fsConnection,
+          fun,
+          timeout,
+          linger
+        )
 
-          val decider: Supervision.Decider = {
-            case ne: NullPointerException => {
-              adapter.error(
-                fsConnection.logMarker,
-                ne,
-                s"CALL ${callId} NullPointerException in FS Server Flow; will Resume"
-              )
-              Supervision.Resume
-            }
-            case ex => {
-              adapter.error(
-                fsConnection.logMarker,
-                ex,
-                s"CALL ${callId} Exception in FS Server Flow; will Stop"
-              )
-              Supervision.Stop
-            }
-          }
+        val (upStreamCompletion, source, protocol) = flow(fsConnection)
 
-          val (_, downStreamStarted: Future[Mat1]) = {
-            val flowStage1 = connection.flow
-              .join(protocol)
-              .recover {
-                case e => {
-                  adapter.error(fsConnection.logMarker, e.getMessage, e)
-                  throw e
-                }
-              }
-              .buffer(1000, OverflowStrategy.fail)
-
-            flowStage1
-              .logWithMarker(
-                name = "esl-freeswitch-ingest",
-                e =>
-                  LogMarker(
-                    name = "esl-freeswitch-ingest",
-                    properties = Map(
-                      "element" -> e,
-                      "connection" -> fsConnection.getConnectionId,
-                      "CallID" -> callId
-                    )
-                  )
-              )
-              .addAttributes(
-                Attributes.logLevels(
-                  onElement = if (enableDebugLogs) {
-                    Attributes.LogLevels.Debug
-                  } else {
-                    Attributes.LogLevels.Off
-                  },
-                  onFinish = Attributes.LogLevels.Info,
-                  onFailure = Attributes.LogLevels.Error
-                )
-              )
-              .addAttributes(ActorAttributes.supervisionStrategy(decider))
-              .runWith(source, sink)
-          }
-
-          onFsConnectionStart(
-            callId,
-            connection,
-            fsConnection,
-            upStreamCompletion,
-            downStreamStarted
-          )
-
-          adapter
-            .info(
+        val decider: Supervision.Decider = {
+          case ne: NullPointerException => {
+            adapter.error(
               fsConnection.logMarker,
-              s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] - Connection Success"
+              ne,
+              s"CALL ${callId} NullPointerException in FS Server Flow; will Resume"
             )
-
-          downStreamStarted.onComplete {
-            case Success(_) =>
-              adapter.info(
-                fsConnection.logMarker,
-                s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Downstream has been started successfully"
-              )
-            case Failure(ex: NeverMaterializedException) =>
-              adapter.debug(
-                fsConnection.logMarker,
-                s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Downstream start failure with Never materialized exception"
-              )
-            case Failure(ex) =>
-              adapter.error(
-                fsConnection.logMarker,
-                s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Downstream start failure with error ${ex.getMessage}",
-                ex
-              )
+            Supervision.Resume
           }
-
-          upStreamCompletion.onComplete {
-            case Success(_) =>
-              adapter.info(
-                fsConnection.logMarker,
-                s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Upstream has been closed successfully"
-              )
-            case Failure(ex) =>
-              adapter.error(
-                fsConnection.logMarker,
-                s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Upstream closed with error ${ex.getMessage}",
-                ex
-              )
+          case ex => {
+            adapter.error(
+              fsConnection.logMarker,
+              ex,
+              s"CALL ${callId} Exception in FS Server Flow; will Stop"
+            )
+            Supervision.Stop
           }
         }
+
+        val (_, downStreamStarted: Future[Mat1]) = {
+          val flowStage1 = connection.flow
+            .join(protocol)
+            .recover {
+              case e => {
+                adapter.error(fsConnection.logMarker, e.getMessage, e)
+                throw e
+              }
+            }
+            .buffer(1000, OverflowStrategy.fail)
+
+          flowStage1
+            .logWithMarker(
+              name = "esl-freeswitch-ingest",
+              e =>
+                LogMarker(
+                  name = "esl-freeswitch-ingest",
+                  properties = Map(
+                    "element" -> e,
+                    "connection" -> fsConnection.getConnectionId,
+                    "CallID" -> callId
+                  )
+                )
+            )
+            .addAttributes(
+              Attributes.logLevels(
+                onElement = if (enableDebugLogs) {
+                  Attributes.LogLevels.Debug
+                } else {
+                  Attributes.LogLevels.Off
+                },
+                onFinish = Attributes.LogLevels.Info,
+                onFailure = Attributes.LogLevels.Error
+              )
+            )
+            .addAttributes(ActorAttributes.supervisionStrategy(decider))
+            .runWith(source, sink)
+        }
+
+        onFsConnectionStart(
+          callId,
+          connection,
+          fsConnection,
+          upStreamCompletion,
+          downStreamStarted
+        )
+
+        adapter
+          .info(
+            fsConnection.logMarker,
+            s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] - Connection Success"
+          )
+
+        downStreamStarted.onComplete {
+          case Success(_) =>
+            adapter.info(
+              fsConnection.logMarker,
+              s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Downstream has been started successfully"
+            )
+          case Failure(ex: NeverMaterializedException) =>
+            adapter.debug(
+              fsConnection.logMarker,
+              s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Downstream start failure with Never materialized exception"
+            )
+          case Failure(ex) =>
+            adapter.error(
+              fsConnection.logMarker,
+              s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Downstream start failure with error ${ex.getMessage}",
+              ex
+            )
+        }
+
+        upStreamCompletion.onComplete {
+          case Success(_) =>
+            adapter.info(
+              fsConnection.logMarker,
+              s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Upstream has been closed successfully"
+            )
+          case Failure(ex) =>
+            adapter.error(
+              fsConnection.logMarker,
+              s"CALL-ID $callId FS-INTERFACE Id ${fsConnection.getConnectionId} FS Inbound Connection [remote address ${connection.remoteAddress}] Upstream closed with error ${ex.getMessage}",
+              ex
+            )
+        }
       }
+    }
+
+    Tcp()
+      .bind(address, port, backlog = 1000, idleTimeout = 20 seconds)
+      .to(sink)
+      .run()
   }
 }
