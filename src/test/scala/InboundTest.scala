@@ -1,4 +1,5 @@
 import OutboundTest.system
+import akka.Done
 import akka.actor.ActorSystem
 import akka.event.{Logging, MarkerLoggingAdapter}
 import akka.stream.Materializer
@@ -9,15 +10,17 @@ import esl.InboundServer
 import esl.domain.EventNames.{All, ChannelAnswer}
 import esl.domain.{ApplicationCommandConfig, EventMessage}
 
+import scala.concurrent.Future
 import scala.util.{Failure, Success}
 
 object InboundTest extends App with LazyLogging {
   implicit val system = ActorSystem()
   implicit val mater = Materializer(system)
   implicit val ec = system.dispatcher
-  implicit val adapter: MarkerLoggingAdapter = Logging.withMarker(system, "hubbub-esl-fs")
+  implicit val adapter: MarkerLoggingAdapter =
+    Logging.withMarker(system, "hubbub-esl-fs")
   InboundServer("localhost", 8021)
-    .connect("ClueCon") { fsSocket =>
+    .connect("ClueCon") { (_, fsSocket) =>
       /** Inbound fsConnection future will get completed when client is authorised by freeswitch */
       fsSocket.onComplete {
         case Success(socket) =>

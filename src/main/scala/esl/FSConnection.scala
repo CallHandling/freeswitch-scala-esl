@@ -24,7 +24,7 @@ import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source}
 import akka.util.ByteString
 import esl.FSConnection.{FSData, _}
 import esl.domain.CallCommands._
-import esl.domain.EventNames.EventName
+import esl.domain.EventNames.{EventName, events}
 import esl.domain.HangupCauses.HangupCause
 import esl.domain.{ApplicationCommandConfig, FSMessage, _}
 import esl.parser.{DefaultParser, Parser}
@@ -76,7 +76,8 @@ abstract class FSConnection extends StrictLogging {
     onCommandCallbacks = onCommandCallbacks :+ partialFunction
   }
 
-  def logMarker = LogMarker("hubbub-esl-fs", Map("CALL-ID" -> getConnectionId))
+  def logMarker =
+    LogMarker("hubbub-esl-fs", Map("FS-INTERFACE-ID" -> getConnectionId))
 
   private[this] val killSwitch =
     KillSwitches.shared("kill-" + getConnectionId)
@@ -87,16 +88,25 @@ abstract class FSConnection extends StrictLogging {
   private[this] val commandQueue: mutable.Queue[Promise[CommandReply]] =
     mutable.Queue.empty
 
-  private[this] val eventMap: mutable.Map[String, CommandToQueue] =
-    mutable.Map.empty
+  private[this] val eventMap
+      : scala.collection.concurrent.Map[String, CommandToQueue] =
+    scala.collection.concurrent.TrieMap.empty[String, CommandToQueue]
 
-  private[this] val decider: Supervision.Decider = {
-    case _: NullPointerException => {
-      adapter.error(logMarker, "NullPointerException in Supervisor Resume")
+  private[this] def decider(origin: String): Supervision.Decider = {
+    case ne: NullPointerException => {
+      adapter.error(
+        logMarker,
+        ne,
+        s"NullPointerException in FS Connection Flow @$origin; will Resume"
+      )
       Supervision.Resume
     }
     case ex => {
-      adapter.error(logMarker, ex, "Exception in Supervisor Stop")
+      adapter.error(
+        logMarker,
+        ex,
+        s"Exception in FS Connection Flow @$origin; will Stop"
+      )
       Supervision.Stop
     }
   }
@@ -105,32 +115,35 @@ abstract class FSConnection extends StrictLogging {
     val sourceStage1 = Source
       .queue[FSCommand](50, OverflowStrategy.fail)
 
-    {
-      if (enableDebugLogs) {
-        sourceStage1
-          .logWithMarker(
-            name = "esl-freeswitch-out",
-            e =>
-              LogMarker(
-                name = "esl-freeswitch-out",
-                properties = Map("element" -> e, "connection" -> connectionId)
-              )
+    sourceStage1
+      .logWithMarker(
+        name = "esl-freeswitch-outstream",
+        e =>
+          LogMarker(
+            name = "esl-freeswitch-outstream",
+            properties = Map("element" -> e, "connection" -> connectionId)
           )
-          .addAttributes(
-            Attributes.logLevels(
-              onElement = Attributes.LogLevels.Info,
-              onFinish = Attributes.LogLevels.Info,
-              onFailure = Attributes.LogLevels.Error
-            )
-          )
-      } else sourceStage1
-    }.recover {
+      )
+      .addAttributes(
+        Attributes.logLevels(
+          onElement = if (enableDebugLogs) {
+            Attributes.LogLevels.Debug
+          } else {
+            Attributes.LogLevels.Off
+          },
+          onFinish = Attributes.LogLevels.Info,
+          onFailure = Attributes.LogLevels.Error
+        )
+      )
+      .recover {
         case e => {
           adapter.error(logMarker, e.getMessage, e)
           throw e
         }
       }
-      .addAttributes(ActorAttributes.supervisionStrategy(decider))
+      .addAttributes(
+        ActorAttributes.supervisionStrategy(decider("fs-command-queue"))
+      )
       .toMat(Sink.asPublisher(false))(Keep.both)
       .run()
   }
@@ -142,7 +155,9 @@ abstract class FSConnection extends StrictLogging {
   private[this] val downStreamFlow: Flow[ByteString, FSData, _] =
     Flow[ByteString]
       .via(killSwitch.flow)
-      .addAttributes(ActorAttributes.supervisionStrategy(decider))
+      .addAttributes(
+        ActorAttributes.supervisionStrategy(decider("fs-events-receive"))
+      )
       .statefulMapConcat(() => {
         var unParsedBuffer: String = ""
         data => {
@@ -190,12 +205,18 @@ abstract class FSConnection extends StrictLogging {
       queue.watchCompletion(),
       Source
         .fromPublisher(source)
-        .addAttributes(ActorAttributes.supervisionStrategy(decider)),
+        .addAttributes(
+          ActorAttributes.supervisionStrategy(decider("bidi-fs-command"))
+        ),
       BidiFlow.fromFlows(
         downStreamFlow
-          .addAttributes(ActorAttributes.supervisionStrategy(decider)),
+          .addAttributes(
+            ActorAttributes.supervisionStrategy(decider("bidi-fs-events"))
+          ),
         upStreamFlow
-          .addAttributes(ActorAttributes.supervisionStrategy(decider))
+          .addAttributes(
+            ActorAttributes.supervisionStrategy(decider("bidi-fs-command-2"))
+          )
       )
     )
   }
@@ -212,11 +233,12 @@ abstract class FSConnection extends StrictLogging {
     * @return Sink[List[T], NotUsed]
     */
   def init[FS <: FSConnection, Mat](
+      callId: String,
       fsConnectionPromise: Promise[FSSocket[FS]],
       fsConnection: FS,
-      fun: Future[FSSocket[FS]] => Sink[FSData, Mat],
+      fun: (String, Future[FSSocket[FS]]) => Sink[FSData, Mat],
       timeout: FiniteDuration,
-      lingering: Boolean
+      needToLinger: Boolean
   ) = {
     lazy val timeoutFuture =
       after(duration = timeout, using = system.scheduler) {
@@ -231,20 +253,14 @@ abstract class FSConnection extends StrictLogging {
       Future
         .firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
         .map(fsSocket => {
-          fsSocket.fsConnection.setConnectionId(
-            fsSocket.channelData.headers.getOrElse(
-              HeaderNames.uniqueId,
-              fsSocket.fsConnection.getConnectionId
-            )
-          )
-          fun(Future.successful(fsSocket))
+          fun(callId, Future.successful(fsSocket))
         })
         .transform({
           case failure @ Failure(ex) =>
             adapter.error(
               logMarker,
               ex,
-              "About to shutdown due to exception in Future sink"
+              s"CALL ${callId} About to shutdown due to exception in Future sink"
             )
             kill
             failure
@@ -256,10 +272,14 @@ abstract class FSConnection extends StrictLogging {
         case ::(command: CommandReply, _)
             if (command.headers.contains(HeaderNames.uniqueId)) =>
           if (command.success) {
-            fsConnectionPromise.complete(
-              Success(FSSocket(fsConnection, ChannelData(command.headers)))
+            val fsSocket = FSSocket(fsConnection, ChannelData(command.headers))
+            fsSocket.fsConnection.setConnectionId(
+              fsSocket.channelData.headers(HeaderNames.uniqueId)
             )
-            if (lingering) publishNonMappingCommand(LingerCommand)
+            fsConnectionPromise.complete(
+              Success(fsSocket)
+            )
+            if (needToLinger) publishNonMappingCommand(LingerCommand)
             (
               fsData
                 .copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),
@@ -268,12 +288,12 @@ abstract class FSConnection extends StrictLogging {
           } else {
             adapter.error(
               logMarker,
-              s"Socket failed to make connection with an error: ${command.errorMessage}"
+              s"CALL ${callId}Socket failed to make connection with an error: ${command.errorMessage}"
             )
             fsConnectionPromise.complete(
               Failure(
                 new Exception(
-                  s"Socket failed to make connection with an error: ${command.errorMessage}"
+                  s"CALL ${callId}Socket failed to make connection with an error: ${command.errorMessage}"
                 )
               )
             )
@@ -288,7 +308,7 @@ abstract class FSConnection extends StrictLogging {
         case ::(command: CommandReply, _) =>
           adapter.info(
             logMarker,
-            s"Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}"
+            s"CALL ${callId} Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}"
           )
           if (command.success) {
             (
@@ -326,56 +346,77 @@ abstract class FSConnection extends StrictLogging {
       .statefulMapConcat(() => {
         var hasConnected: Boolean = false
         var isLingering: Boolean = false
+        var isFiltering: Boolean = false
+        val buffer: mutable.ListBuffer[FSData] =
+          mutable.ListBuffer.empty[FSData]
+
+        def filterFSMessages(fSData: FSData): FSData = {
+          val (messagesWithSameId, messagesWithDifferentId) = {
+            fSData.fsMessages.partition { message =>
+              message.headers
+                .get(HeaderNames.uniqueId)
+                .fold(true)(uniqueIdHeaderValue =>
+                  uniqueIdHeaderValue == getConnectionId || getOriginatedCallIds
+                    .contains(uniqueIdHeaderValue)
+                )
+            }
+          }
+          if (messagesWithDifferentId.nonEmpty) {
+            adapter.warning(
+              logMarker,
+              s"""CALL $callId FS-INTERFACE-ID $getConnectionId $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other calls
+                 |getOriginatedCallIds = ${getOriginatedCallIds
+                .mkString("[", ",", "]")}
+                 |other call ids ${messagesWithDifferentId
+                .map(_.headers(HeaderNames.uniqueId))
+                .mkString("[", ",", "]")}
+                 |
+                 |------  messages below -----
+                 |${messagesWithDifferentId
+                .map(freeSwitchMsgToString)
+                .mkString("\n----")}""".stripMargin
+            )
+          }
+          fSData.copy(fsMessages = messagesWithSameId)
+        }
+
         fSData => {
-          val cmdReplies = getCmdReplies(fSData)
-          val isConnect = cmdReplies.foldLeft(false)((_, b) =>
+          lazy val cmdReplies = getCmdReplies(fSData)
+          lazy val isConnect = cmdReplies.foldLeft(false)((_, b) =>
             b.headers.contains(HeaderNames.uniqueId)
           )
-          val updatedFSData =
-            if (cmdReplies.nonEmpty && !hasConnected && isConnect) {
+
+          val updatedFSData = {
+            if (!hasConnected && !isConnect) {
+              buffer.append(fSData)
+              fSData.copy(fsMessages = Nil)
+            } else if (!hasConnected && isConnect) {
               val con = connectToFS(fSData, hasConnected)
               hasConnected = con._2
-              con._1
+              if (hasConnected) {
+                val allMessages = fSData.copy(fsMessages =
+                  buffer.flatMap(_.fsMessages).toList ++ fSData.fsMessages
+                )
+                buffer.clear()
+                filterFSMessages(allMessages)
+              } else {
+                buffer.append(con._1)
+                fSData.copy(fsMessages = Nil)
+              }
             } else if (
-              cmdReplies.nonEmpty && lingering && !isLingering && !isConnect && cmdReplies
-                .count {
+              needToLinger && !isLingering && !isConnect && cmdReplies
+                .exists {
                   case a: CommandReply =>
                     a.replyText.getOrElse("") == "+OK will linger"
-                } > 0
+                }
             ) {
               val ling = doLinger(fSData, isLingering)
               isLingering = ling._2
-              ling._1
+              filterFSMessages(ling._1)
             } else {
-              if (hasConnected && isLingering) {
-                val (messagesWithSameId, messagesWithDifferentId) =
-                  fSData.fsMessages.partition { message =>
-                    message.headers
-                      .get(HeaderNames.uniqueId)
-                      .fold(true)(x =>
-                        x == getConnectionId || getOriginatedCallIds.contains(x)
-                      )
-                  }
-                if (messagesWithDifferentId.nonEmpty) {
-                  adapter.warning(
-                    logMarker,
-                    s"""CALL $getConnectionId $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other calls
-                       |getOriginatedCallIds = ${getOriginatedCallIds
-                      .mkString("[", ",", "]")}
-                       |other call ids ${messagesWithDifferentId
-                      .map(_.headers(HeaderNames.uniqueId))
-                      .mkString("[", ",", "]")}
-                      |
-                      |------  messages below -----
-                      |${messagesWithDifferentId
-                      .map(freeSwitchMsgToString)
-                      .mkString("\n----")}""".stripMargin
-                  )
-                }
-                fSData.copy(fsMessages = messagesWithSameId)
-              } else fSData
+              filterFSMessages(fSData)
             }
-          //Send every message
+          }
           List(
             updatedFSData
               .copy(fsMessages =
@@ -384,7 +425,7 @@ abstract class FSConnection extends StrictLogging {
           )
         }
       })
-      .addAttributes(ActorAttributes.supervisionStrategy(decider))
+      .addAttributes(ActorAttributes.supervisionStrategy(decider("fs-init")))
       .toMat(futureSink)(Keep.right)
 
   }
@@ -430,6 +471,8 @@ abstract class FSConnection extends StrictLogging {
     cmdReply
   }
 
+  private val space = "    "
+
   /**
     * This will get an element from `eventMap` map by event's uuid
     * Complete promises after receiving `CHANNEL_EXECUTE` and `CHANNEL_EXECUTE_COMPLETE` events
@@ -438,17 +481,85 @@ abstract class FSConnection extends StrictLogging {
     * @return EventMessage
     */
   private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
-    eventMessage.applicationUuid.flatMap(eventMap.lift).foreach {
-      commandToQueue =>
-        if (eventMessage.eventName.contains(EventNames.ChannelExecute))
-          commandToQueue.executeEvent.complete(Success(eventMessage))
-        else if (
-          eventMessage.eventName.contains(EventNames.ChannelExecuteComplete)
-        ) {
-          commandToQueue.executeComplete.complete(Success(eventMessage))
-          eventMap.remove(commandToQueue.command.eventUuid)
+
+    eventMessage.applicationUuid match {
+      case Some(appId) => {
+        eventMap.get(appId) match {
+          case Some(commandToQueue) => {
+            if (eventMessage.eventName.contains(EventNames.ChannelExecute))
+              commandToQueue.executeEvent.complete(Success(eventMessage))
+            else if (
+              eventMessage.eventName.contains(EventNames.ChannelExecuteComplete)
+            ) {
+              commandToQueue.executeComplete.complete(Success(eventMessage))
+              eventMap.remove(commandToQueue.command.eventUuid)
+              adapter.info(
+                logMarker,
+                s"""handleFSEventMessage for app id $appId Removing entry
+                   |>> TYPE
+                   |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                   |>> HEADERS
+                   |${eventMessage.headers
+                  .map(h => h._1 + " : " + h._2)
+                  .mkString(space, "\n" + space, "")}
+                   |>> BODY
+                   |${eventMessage.body}
+                   |>> MAP is below
+                   |${eventMap
+                  .map({ item =>
+                    s"""appId: ${item._1}
+                         |command
+                         |${item._2.command}""".stripMargin
+                  })
+                  .mkString("\n")}""".stripMargin
+              )
+            } else {
+              adapter.warning(
+                logMarker,
+                s"""handleFSEventMessage for app id $appId Unable to handle Command (unexpected eventName header)
+                   |>> TYPE
+                   |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                   |>> HEADERS
+                   |${eventMessage.headers
+                  .map(h => h._1 + " : " + h._2)
+                  .mkString(space, "\n" + space, "")}
+                   |>> BODY
+                   |${eventMessage.body}""".stripMargin
+              )
+            }
+          }
+          case _ => {
+            adapter.warning(
+              logMarker,
+              s"""handleFSEventMessage for app id $appId Unable to find Command in look up
+                 |>> TYPE
+                 |EVENT ${eventMessage.eventName}
+                 |>> HEADERS
+                 |${eventMessage.headers
+                .map(h => h._1 + " : " + h._2)
+                .mkString(space, "\n" + space, "")}
+                 |>> BODY
+                 |${eventMessage.body}""".stripMargin
+            )
+          }
         }
+      }
+      case _ => {
+        adapter.debug(
+          logMarker,
+          s"""handleFSEventMessage Unable to find application id header for event message
+             |>> TYPE
+             |EVENT ${eventMessage.eventName}
+             |>> HEADERS
+             |${eventMessage.headers
+            .map(h => h._1 + " : " + h._2)
+            .mkString(space, "\n" + space, "")}
+             |>> BODY
+             |${eventMessage.body}""".stripMargin
+        )
+      }
     }
+
     eventMessage
   }
 
@@ -500,7 +611,22 @@ abstract class FSConnection extends StrictLogging {
         val (commandReply, commandToQueue, cmdResponse) =
           buildCommandAndResponse(command)
         commandQueue.enqueue(commandReply)
-        eventMap += command.eventUuid -> commandToQueue
+        val appId = command.eventUuid
+        eventMap.put(appId, commandToQueue)
+        adapter.info(
+          logMarker,
+          s"""publishCommand for app id $appId Added to lookup
+             |>> COMMAND
+             |$command
+             |>> MAP is now
+             |${eventMap
+            .map({ item =>
+              s"""appId: ${item._1}
+               |command
+               |${item._2.command}""".stripMargin
+            })
+            .mkString("\n")}""".stripMargin
+        )
         onCommandCallbacks
           .foreach(
             _.lift(

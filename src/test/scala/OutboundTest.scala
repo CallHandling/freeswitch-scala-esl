@@ -24,7 +24,7 @@ object OutboundTest extends App with LazyLogging {
     Logging.withMarker(system, "hubbub-esl-fs")
 
   OutboundServer("127.0.0.1", 8084, enableDebugLogs = true)
-    .startWith(fsSocket => {
+    .startWith((_, fsSocket) => {
 
       /** For each outbound connection from freeswitch you will get a future named here 'fsSocket' this future will complete when we get a response from freeswitch to a connect command that is sent automatically by the library */
 

@@ -25,6 +25,7 @@ import akka.util.ByteString
 import com.typesafe.config.Config
 import esl.FSConnection.{FSData, FSSocket}
 
+import java.util.UUID
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 
@@ -137,11 +138,14 @@ class InboundServer(
     * @return Future[(UpSourceCompletionFuture, DownStreamCompletionFuture)]
     */
   def connect[Mat](password: String)(
-      fun: Future[FSSocket[InboundFSConnection]] => Sink[FSData, Mat]
+      fun: (String, Future[FSSocket[InboundFSConnection]]) => Sink[FSData, Mat]
   ): Future[(Future[Done], Future[Mat])] = {
     val fsConnection = InboundFSConnection(enableDebugLogs)
     fsConnection.connect(password).map { _ =>
+      val callId = UUID.randomUUID().toString
+
       val sink = fsConnection.init(
+        callId,
         Promise[FSSocket[InboundFSConnection]](),
         fsConnection,
         fun,
