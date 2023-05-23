@@ -709,9 +709,10 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def break(
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
+      config: ApplicationCommandConfig = ApplicationCommandConfig(),
+      app : Option[String] = Option.empty
   ): Future[CommandResponse] =
-    publishCommand(Break(config))
+    publishCommand(Break(config, app))
 
   /**
     * Answer the call for a channel.This sets up duplex audio between the calling ''A'' leg and the FreeSwitch server.
@@ -781,6 +782,14 @@ abstract class FSConnection extends StrictLogging {
     setOriginatedCallIds(uuid)
     publishCommand(FilterUUId(uuid, config))
   }
+
+  def filterX(
+                  filter: String,
+                  config: ApplicationCommandConfig = ApplicationCommandConfig()
+                ): Future[CommandResponse] = {
+    publishCommand(FilterX(filter, config))
+  }
+
 
   /**
     * filter delete

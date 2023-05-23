@@ -68,7 +68,10 @@ final case class ApplicationCommandConfig(
     eventLock: Boolean = false,
     loops: Int = 1,
     async: Boolean = false
-)
+) {
+  def withChannelId(channelId: String): ApplicationCommandConfig =
+    copy(channelUuid = channelId)
+}
 
 object CallCommands {
 
@@ -99,9 +102,10 @@ object CallCommands {
     override val args: String = cause.fold("")(_.name)
   }
 
-  final case class Break(config: ApplicationCommandConfig)
+  final case class Break(config: ApplicationCommandConfig, app: Option[String])
       extends FSExecuteApp {
     override val application: String = s"break$MESSAGE_TERMINATOR"
+    override lazy val args: String = app.getOrElse("")
   }
 
   /**
@@ -208,17 +212,86 @@ object CallCommands {
     override val args: String = targets.mkString(dialType.separator)
   }
 
-  final case class Dial(
-      target: String,
-      uniqueId: String,
-      numberPresentation: Dial.NumberPresentation,
+  final case class AddToConference(
+      conferenceId: String,
+      profile: String,
       config: ApplicationCommandConfig,
-      timeout: FiniteDuration,
-      retries: Option[Dial.Retry] = Option.empty
+      flags: Seq[String] = Seq.empty
   ) extends FSExecuteApp {
-    override lazy val application: String = "originate"
-    override lazy val args: String = {
+    override val application: String = "conference"
+    override val args: String =
+      s"$conferenceId@$profile${flags.mkString("+flags{", "|", "}")}"
+  }
 
+  final case class LeaveConference(
+      conferenceId: String,
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
+    override val application: String = "conference"
+    override val args: String = s"hangup:$conferenceId"
+  }
+
+  final case class ConferenceCommand(
+      conferenceId: String,
+      command: ConferenceCommand.ConferenceCommandType,
+      commandConfig: ApplicationCommandConfig
+  ) extends FSExecuteApp {
+
+    lazy val config: ApplicationCommandConfig =
+      commandConfig.copy(channelUuid = "")
+
+    override val application: String = "conference"
+
+    override val args: String = s"$conferenceId $command"
+
+  }
+
+  object ConferenceCommand {
+
+    sealed trait ConferenceCommandType {
+      def forConference(conferenceId:String, config: ApplicationCommandConfig) : ConferenceCommand
+    }
+    final case class Play(
+        file: String,
+        nomux: Boolean = false,
+        memberId: Option[String] = Option.empty,
+        async: Boolean = true
+    ) extends ConferenceCommandType {
+
+      override def toString: String =
+        s"play $file${(memberId, async, nomux) match {
+          case (Some(memberId), _, true) => s" $memberId nomux"
+          case (Some(memberId), _, _)    => s" $memberId"
+          case (_, true, true)           => " async nomux"
+          case (_, true, _)              => " async nomux"
+          case _                         => ""
+        }}"
+
+      override def forConference(conferenceId: String, config: ApplicationCommandConfig): ConferenceCommand = {
+        ConferenceCommand(conferenceId, this, config)
+      }
+    }
+
+    final case class PausePlay() extends ConferenceCommandType {
+
+      override def toString: String = "pause_play"
+
+      override def forConference(conferenceId: String, config: ApplicationCommandConfig): ConferenceCommand = {
+        ConferenceCommand(conferenceId, this, config)
+      }
+    }
+  }
+
+/*
+  final case class Dial(
+                         target: String,
+                         uniqueId: String,
+                         numberPresentation: Dial.NumberPresentation,
+                         config: ApplicationCommandConfig,
+                         timeout: FiniteDuration,
+                         retries: Option[Dial.Retry] = Option.empty
+                       ) extends FSCommand {
+    override def toString: String = {
       val vars = Seq(
         "ignore_early_media=true",
         s"originate_timeout=${timeout.toSeconds}",
@@ -227,7 +300,34 @@ object CallCommands {
         numberPresentation.asOriginateArgs ++
         retries.map(_.asOriginateArgs).getOrElse(Nil)
 
-      s"${vars.asVarsString}$target &park()"
+      s"""bgapi originate ${vars.asVarsString}$target &park()
+         |Job-UUID: $eventUuid""".stripMargin
+    }
+  }*/
+
+  final case class Dial(
+      target: String,
+      uniqueId: String,
+      numberPresentation: Dial.NumberPresentation,
+      config: ApplicationCommandConfig,
+      timeout: FiniteDuration,
+      retries: Option[Dial.Retry] = Option.empty
+  ) extends FSExecuteApp {
+
+    override val application: String = "set"
+    override lazy val args: String = {
+      val vars = Seq(
+        "ignore_early_media=true",
+        s"originate_timeout=${timeout.toSeconds}",
+        s"origination_uuid=$uniqueId"
+      ) ++
+        numberPresentation.asOriginateArgs ++
+        retries.map(_.asOriginateArgs).getOrElse(Nil)
+
+      s"""dial_$eventUuid=$${
+         |bgapi originate {${vars.asVarsString}}$target &park()
+         |Job-UUID: $eventUuid
+         |}""".stripMargin
     }
   }
 
@@ -335,6 +435,12 @@ object CallCommands {
       extends FSCommand {
     override def toString: String =
       s"filter Unique-ID ${uuid}$MESSAGE_TERMINATOR"
+  }
+
+  final case class FilterX(filter: String, config: ApplicationCommandConfig)
+    extends FSCommand {
+    override def toString: String =
+      s"filter ${filter}$MESSAGE_TERMINATOR"
   }
 
   /**
