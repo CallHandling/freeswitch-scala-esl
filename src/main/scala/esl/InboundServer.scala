@@ -141,18 +141,22 @@ class InboundServer(
       fun: (String, Future[FSSocket[InboundFSConnection]]) => Sink[FSData, Mat]
   ): Future[(Future[Done], Future[Mat])] = {
     val fsConnection = InboundFSConnection(enableDebugLogs)
-    fsConnection.connect(password).map { _ =>
-      val callId = UUID.randomUUID().toString
 
-      val sink = fsConnection.init(
-        callId,
-        Promise[FSSocket[InboundFSConnection]](),
-        fsConnection,
-        fun,
-        timeout,
-        linger
-      )
-      val (upCompF, _, downCompF) = client(sink, fsConnection.handler())
+    val callId = UUID.randomUUID().toString
+
+    val sink = fsConnection.init(
+      callId,
+      Promise[FSSocket[InboundFSConnection]](),
+      fsConnection,
+      fun,
+      timeout,
+      linger
+    )
+    val (upCompF, _, downCompF) = client(sink, fsConnection.handler())
+
+
+    fsConnection.connect(password)
+      .map { _ =>
       (upCompF, downCompF)
     }
   }

@@ -51,7 +51,7 @@ case class CommandReply(basicMessage: BasicMessage) extends FSMessage {
 
   val replyText = headers.lift(HeaderNames.replyText)
 
-  val success: Boolean = replyText.exists(f => f.charAt(0) == '+' || f == "%2BOK%0A")
+  lazy val success: Boolean = replyText.exists(f => f.charAt(0) == '+' || f == "%2BOK%0A")
 
   val errorMessage: String = replyText.collect {
     case text if text.startsWith("-ERR") => text.substring(5, text.length - 5)

@@ -238,7 +238,8 @@ abstract class FSConnection extends StrictLogging {
       fsConnection: FS,
       fun: (String, Future[FSSocket[FS]]) => Sink[FSData, Mat],
       timeout: FiniteDuration,
-      needToLinger: Boolean
+      needToLinger: Boolean,
+      isInbound: Boolean = false
   ) = {
     lazy val timeoutFuture =
       after(duration = timeout, using = system.scheduler) {
@@ -323,7 +324,7 @@ abstract class FSConnection extends StrictLogging {
       }
     }
 
-    val getCmdReplies = (fSData: FSData) => {
+    val getCmdReplies: FSData => List[CommandReply] = (fSData: FSData) => {
       fSData.fsMessages.filter(a => a.contentType == ContentTypes.commandReply)
     }
 
@@ -381,9 +382,13 @@ abstract class FSConnection extends StrictLogging {
         }
 
         fSData => {
-          lazy val cmdReplies = getCmdReplies(fSData)
-          lazy val isConnect = cmdReplies.foldLeft(false)((_, b) =>
-            b.headers.contains(HeaderNames.uniqueId)
+          val cmdReplies = getCmdReplies(fSData)
+          val isConnect = /*change logic of is connect on inbound mode*/cmdReplies.foldLeft(false)((_, b) =>
+             if(isInbound) {
+               b.success
+             } else {
+               b.headers.contains(HeaderNames.uniqueId)
+             }
           )
 
           val updatedFSData = {
