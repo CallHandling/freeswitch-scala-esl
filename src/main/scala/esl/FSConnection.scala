@@ -271,7 +271,7 @@ abstract class FSConnection extends StrictLogging {
     lazy val connectToFS = (fsData: FSData, hasConnected: Boolean) => {
       fsData.fsMessages match {
         case ::(command: CommandReply, _)
-            if (command.headers.contains(HeaderNames.uniqueId)) =>
+            if command.headers.contains(HeaderNames.uniqueId) || isInbound =>
           if (command.success) {
             val fsSocket = FSSocket(fsConnection, ChannelData(command.headers))
             fsSocket.fsConnection.setConnectionId(
@@ -324,7 +324,7 @@ abstract class FSConnection extends StrictLogging {
       }
     }
 
-    val getCmdReplies: FSData => List[CommandReply] = (fSData: FSData) => {
+    val getCmdReplies: FSData => List[FSMessage] = (fSData: FSData) => {
       fSData.fsMessages.filter(a => a.contentType == ContentTypes.commandReply)
     }
 
@@ -382,14 +382,19 @@ abstract class FSConnection extends StrictLogging {
         }
 
         fSData => {
+
           val cmdReplies = getCmdReplies(fSData)
-          val isConnect = /*change logic of is connect on inbound mode*/cmdReplies.foldLeft(false)((_, b) =>
-             if(isInbound) {
-               b.success
-             } else {
-               b.headers.contains(HeaderNames.uniqueId)
-             }
-          )
+
+          val isConnect = {
+            cmdReplies.foldLeft(false)((_, b) =>
+              if (isInbound) {
+                b.asInstanceOf[CommandReply].success
+              } else {
+                b.headers.contains(HeaderNames.uniqueId)
+              }
+            )
+          }
+
 
           val updatedFSData = {
             if (!hasConnected && !isConnect) {
