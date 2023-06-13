@@ -599,15 +599,12 @@ abstract class FSConnection extends StrictLogging {
         })
         .recoverWith({
           case e => {
-            println(s"offer failed => $e")
             onCommandCallbacks
               .foreach(_.lift(FireAndForgetFSCommand(command, Failure(e))))
             Future.failed(e)
           }
         })
     } else {
-      println(s"onCommandCallbacks IS EMPTY, with offers: $offerF")
-      offerF.map(f => println(s"@@@@@@@@@@@  future result: $f"))
       offerF
     }
   }
