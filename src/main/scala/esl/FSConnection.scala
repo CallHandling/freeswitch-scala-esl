@@ -275,7 +275,8 @@ abstract class FSConnection extends StrictLogging {
           if (command.success) {
             val fsSocket = FSSocket(fsConnection, ChannelData(command.headers))
             fsSocket.fsConnection.setConnectionId(
-              fsSocket.channelData.headers(HeaderNames.uniqueId)
+              if (isInbound) callId
+              else fsSocket.channelData.headers(HeaderNames.uniqueId)
             )
             fsConnectionPromise.complete(
               Success(fsSocket)
