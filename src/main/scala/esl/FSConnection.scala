@@ -710,7 +710,7 @@ abstract class FSConnection extends StrictLogging {
     */
   def break(
       config: ApplicationCommandConfig = ApplicationCommandConfig(),
-      app : Option[String] = Option.empty
+      app: Option[String] = Option.empty
   ): Future[CommandResponse] =
     publishCommand(Break(config, app))
 
@@ -782,14 +782,18 @@ abstract class FSConnection extends StrictLogging {
     setOriginatedCallIds(uuid)
     publishCommand(FilterUUId(uuid, config))
   }
-
-  def filterX(
-                  filter: String,
-                  config: ApplicationCommandConfig = ApplicationCommandConfig()
-                ): Future[CommandResponse] = {
-    publishCommand(FilterX(filter, config))
+  def createUUID(
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] = {
+    publishCommand(CreateUUID(config))
   }
 
+  def filterX(
+      filter: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] = {
+    publishCommand(FilterX(filter, config))
+  }
 
   /**
     * filter delete

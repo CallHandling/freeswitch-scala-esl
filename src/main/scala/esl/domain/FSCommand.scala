@@ -405,6 +405,11 @@ object CallCommands {
     override def toString: String = s"myevents plain $uuid$MESSAGE_TERMINATOR"
   }
 
+  final case class CreateUUID(config: ApplicationCommandConfig)
+    extends FSCommand {
+    override def toString: String =s"create_uuid$MESSAGE_TERMINATOR"
+  }
+
   /**
     * Specify event types to listen for. Note, this is not a filter out but rather a "filter in," that is,
     * when a filter is applied only the filtered values are received. Multiple filters on a socket connection are allowed.
