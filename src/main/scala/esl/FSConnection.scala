@@ -547,12 +547,12 @@ abstract class FSConnection extends StrictLogging {
       case _ => {
         eventMessage.eventName match {
           case Some(EventNames.Api) =>
-            if (eventMessage.headers("API-Command") == "create-uuid")
+            if (eventMessage.headers.get("API-Command").contains("create_uuid"))
               eventMap.values.foreach(command => command.command match {
                 case _: CreateUUID =>
                   adapter.info(logMarker, "Api event for create_uuid command")
                   command.executeEvent.complete(Success(eventMessage))
-                case command =>
+                case _ =>
                   adapter.debug(logMarker, "Api event for unknown command")
               })
           case Some(EventNames.BackgroundJob) =>
