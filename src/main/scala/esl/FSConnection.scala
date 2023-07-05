@@ -1177,7 +1177,7 @@ object FSConnection {
     * @param channelData  : ChannelData
     * @tparam FS type of Fs connection, it could be Inbound/Outbound
     */
-  case class FSSocket[FS <: FSConnection](
+  case class FSSocket[+FS <: FSConnection](
       fsConnection: FS,
       channelData: ChannelData
   )
