@@ -545,6 +545,53 @@ abstract class FSConnection extends StrictLogging {
         }
       }
       case _ => {
+        eventMessage.eventName match {
+          case Some(EventNames.Api) =>
+            if (eventMessage.headers("API-Command") == "create-uuid")
+              eventMap.values.foreach(command => command.command match {
+                case _: CreateUUID =>
+                  adapter.info(logMarker, "Api event for create_uuid command")
+                  command.executeEvent.complete(Success(eventMessage))
+                case command =>
+                  adapter.debug(logMarker, "Api event for unknown command")
+              })
+          case Some(EventNames.BackgroundJob) =>
+            val jobId = eventMap.get(eventMessage.headers("Job-UUID"))
+            jobId match {
+              case Some(job) =>
+                job.executeComplete.complete(Success(eventMessage))
+                eventMap.remove(job.command.eventUuid)
+                adapter.info(
+                  logMarker,
+                  s"""handleFSEventMessage for background job id $jobId Removing entry
+                     |>> TYPE
+                     |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                     |>> HEADERS
+                     |${
+                    eventMessage.headers
+                      .map(h => h._1 + " : " + h._2)
+                      .mkString(space, "\n" + space, "")
+                  }
+                     |>> BODY
+                     |${eventMessage.body}
+                     |>> MAP is below
+                     |${
+                    eventMap
+                      .map({ item =>
+                        s"""appId: ${item._1}
+                           |command
+                           |${item._2.command}""".stripMargin
+                      })
+                      .mkString("\n")
+                  }""".stripMargin
+                )
+              case _ => adapter.debug(logMarker, "Background job for unknown command")
+
+            }
+
+          case _ =>
+            adapter.info(logMarker, "other event")
+        }
         adapter.debug(
           logMarker,
           s"""handleFSEventMessage Unable to find application id header for event message
