@@ -547,20 +547,20 @@ abstract class FSConnection extends StrictLogging {
       case _ => {
         eventMessage.eventName match {
           case Some(EventNames.Api) =>
-            if (eventMessage.headers.get("API-Command").contains("create_uuid"))
-              eventMap.values.foreach(command => command.command match {
-                case _: CreateUUID =>
-                  adapter.info(logMarker, "Api event for create_uuid command")
-                  command.executeEvent.complete(Success(eventMessage))
-                case _ =>
-                  adapter.debug(logMarker, "Api event for unknown command")
-              })
+            if (eventMessage.headers.get("API-Command").contains("create_uuid")) {
+              val queuedCommand = eventMap.find{case (_, command) => command.command.isInstanceOf[CreateUUID]}.map {
+                case (key, command) => command.executeEvent.complete(Success(eventMessage))
+                  (key, command)
+              }
+              if (queuedCommand.isDefined && queuedCommand.get._2.executeComplete.isCompleted)
+                eventMap.remove(queuedCommand.get._1)
+            }
           case Some(EventNames.BackgroundJob) =>
             val jobId = eventMap.get(eventMessage.headers("Job-UUID"))
             jobId match {
               case Some(job) =>
                 job.executeComplete.complete(Success(eventMessage))
-                eventMap.remove(job.command.eventUuid)
+                if (job.executeEvent.isCompleted) eventMap.remove(job.command.eventUuid)
                 adapter.info(
                   logMarker,
                   s"""handleFSEventMessage for background job id $jobId Removing entry
