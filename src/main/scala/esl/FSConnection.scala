@@ -548,7 +548,7 @@ abstract class FSConnection extends StrictLogging {
         eventMessage.eventName match {
           case Some(EventNames.Api) =>
             if (
-              eventMessage.headers.get("API-Command").contains("create_uuid")
+              eventMessage.apiCommand.contains("create_uuid")
             ) {
               val queuedCommand = eventMap
                 .find {
@@ -565,7 +565,7 @@ abstract class FSConnection extends StrictLogging {
                 eventMap.remove(queuedCommand.get._1)
             }
           case Some(EventNames.BackgroundJob) =>
-            val jobId = eventMap.get(eventMessage.headers("Job-UUID"))
+            val jobId = eventMap.get(eventMessage.jobUuid.getOrElse(""))
             jobId match {
               case Some(job) =>
                 job.executeComplete.complete(Success(eventMessage))
@@ -595,7 +595,37 @@ abstract class FSConnection extends StrictLogging {
                 adapter.debug(logMarker, "Background job for unknown command")
 
             }
-
+          case Some(EventNames.ChannelState) =>
+            adapter.info(
+              logMarker,
+              s"""Channel state event for callId
+                 |${eventMessage.headers("Caller-Unique-ID")}
+                 |>> MAP command is below
+                 |${
+                eventMap
+                  .map({ item =>
+                    s"""appId: ${item._1}
+                       |command
+                       |${
+                      item._2.command
+                    }
+                       |command type ${item._2.command.getClass}""".stripMargin
+                  })
+                  .mkString("\n")
+              }""".stripMargin
+            )
+            val findResult = eventMap.find {
+              case (_, command) =>
+                command.command.isInstanceOf[Dial] &&
+                  eventMessage.callerUniqueId.contains(command.command.asInstanceOf[Dial].uniqueId)
+            }
+            adapter.info(s"Command from map $findResult")
+            findResult match {
+              case Some((key, command)) =>
+                command.executeEvent.complete(Success(eventMessage))
+                if (command.executeComplete.isCompleted) eventMap.remove(key)
+              case _ =>
+            }
           case Some(EventNames.ChannelCallState) =>
             adapter.info(
               logMarker, s"""Channel call state event for callId
@@ -615,22 +645,13 @@ abstract class FSConnection extends StrictLogging {
             val findResult = eventMap.find {
               case (_, command) =>
                 command.command.isInstanceOf[Dial] &&
-                  command.command.asInstanceOf[Dial].uniqueId == eventMessage.headers("Caller-Unique-ID")
+                  eventMessage.callerUniqueId.contains(command.command.asInstanceOf[Dial].uniqueId)
             }
             adapter.info(s"Command from map $findResult")
             findResult match {
               case Some((key, command)) =>
-                if (
-                  eventMessage
-                    .headers("Channel-Call-State")
-                    .contains("RINGING")
-                )
-                  command.executeEvent.complete(Success(eventMessage))
-                else {
                   command.executeComplete.complete(Success(eventMessage))
                   if (command.executeEvent.isCompleted) eventMap.remove(key)
-                }
-
               case _ =>
             }
 
