@@ -544,15 +544,24 @@ abstract class FSConnection extends StrictLogging {
           }
         }
       }
-      case _ => {
+      case _ =>
         eventMessage.eventName match {
           case Some(EventNames.Api) =>
-            if (eventMessage.headers.get("API-Command").contains("create_uuid")) {
-              val queuedCommand = eventMap.find{case (_, command) => command.command.isInstanceOf[CreateUUID]}.map {
-                case (key, command) => command.executeEvent.complete(Success(eventMessage))
-                  (key, command)
-              }
-              if (queuedCommand.isDefined && queuedCommand.get._2.executeComplete.isCompleted)
+            if (
+              eventMessage.headers.get("API-Command").contains("create_uuid")
+            ) {
+              val queuedCommand = eventMap
+                .find {
+                  case (_, command) => command.command.isInstanceOf[CreateUUID]
+                }
+                .map {
+                  case (key, command) =>
+                    command.executeEvent.complete(Success(eventMessage))
+                    (key, command)
+                }
+              if (
+                queuedCommand.isDefined && queuedCommand.get._2.executeComplete.isCompleted
+              )
                 eventMap.remove(queuedCommand.get._1)
             }
           case Some(EventNames.BackgroundJob) =>
@@ -560,33 +569,69 @@ abstract class FSConnection extends StrictLogging {
             jobId match {
               case Some(job) =>
                 job.executeComplete.complete(Success(eventMessage))
-                if (job.executeEvent.isCompleted) eventMap.remove(job.command.eventUuid)
+                if (job.executeEvent.isCompleted)
+                  eventMap.remove(job.command.eventUuid)
                 adapter.info(
                   logMarker,
                   s"""handleFSEventMessage for background job id $jobId Removing entry
                      |>> TYPE
                      |EVENT ${eventMessage.eventName.getOrElse("NA")}
                      |>> HEADERS
-                     |${
-                    eventMessage.headers
-                      .map(h => h._1 + " : " + h._2)
-                      .mkString(space, "\n" + space, "")
-                  }
+                     |${eventMessage.headers
+                    .map(h => h._1 + " : " + h._2)
+                    .mkString(space, "\n" + space, "")}
                      |>> BODY
                      |${eventMessage.body}
                      |>> MAP is below
-                     |${
-                    eventMap
-                      .map({ item =>
-                        s"""appId: ${item._1}
+                     |${eventMap
+                    .map({ item =>
+                      s"""appId: ${item._1}
                            |command
                            |${item._2.command}""".stripMargin
-                      })
-                      .mkString("\n")
-                  }""".stripMargin
+                    })
+                    .mkString("\n")}""".stripMargin
                 )
-              case _ => adapter.debug(logMarker, "Background job for unknown command")
+              case _ =>
+                adapter.debug(logMarker, "Background job for unknown command")
 
+            }
+
+          case Some(EventNames.ChannelCallState) =>
+            adapter.info(
+              logMarker, s"""Channel call state event for callId
+              |${eventMessage.headers("Caller-Unique-ID")}
+              |>> MAP command is below
+              |${eventMap
+                  .map({ item =>
+                    s"""appId: ${item._1}
+                    |command
+                    |${
+                      item._2.command
+                    }
+                    |command type ${item._2.command.getClass}""".stripMargin
+                  })
+                .mkString("\n")}""".stripMargin
+            )
+            val findResult = eventMap.find {
+              case (_, command) =>
+                command.command.isInstanceOf[Dial] &&
+                  command.command.asInstanceOf[Dial].uniqueId == eventMessage.headers("Caller-Unique-ID")
+            }
+            adapter.info(s"Command from map $findResult")
+            findResult match {
+              case Some((key, command)) =>
+                if (
+                  eventMessage
+                    .headers("Channel-Call-State")
+                    .contains("RINGING")
+                )
+                  command.executeEvent.complete(Success(eventMessage))
+                else {
+                  command.executeComplete.complete(Success(eventMessage))
+                  if (command.executeEvent.isCompleted) eventMap.remove(key)
+                }
+
+              case _ =>
             }
 
           case _ =>
@@ -604,7 +649,6 @@ abstract class FSConnection extends StrictLogging {
              |>> BODY
              |${eventMessage.body}""".stripMargin
         )
-      }
     }
 
     eventMessage

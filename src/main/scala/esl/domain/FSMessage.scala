@@ -113,6 +113,9 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
   val channelState: Option[AnswerStates.AnswerState] =
     headers.get(HeaderNames.channelState).fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
 
+  val channelCallState: Option[AnswerStates.AnswerState] =
+    headers.get(HeaderNames.channelCallState).fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
+
   val answerState: Option[AnswerStates.AnswerState] =
     headers.get(HeaderNames.answerState).fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
 

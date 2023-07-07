@@ -26,6 +26,7 @@ object HeaderNames {
   val applicationUuid = "Application-UUID"
   val eventName = "Event-Name"
   val channelState = "Channel-State"
+  val channelCallState = "Channel-CallState"
   val answerState = "Answer-State"
   val hangupCause = "Hangup-Cause"
   val eventSubclass = "Event-Subclass"
