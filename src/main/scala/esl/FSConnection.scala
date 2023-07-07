@@ -551,7 +551,7 @@ abstract class FSConnection extends StrictLogging {
               eventMessage.apiCommand.contains("create_uuid")
             ) {
               val queuedCommand = eventMap
-                .find {
+                .find { //TODO change eventMap key for this command
                   case (_, command) => command.command.isInstanceOf[CreateUUID]
                 }
                 .map {
@@ -614,7 +614,7 @@ abstract class FSConnection extends StrictLogging {
                   .mkString("\n")
               }""".stripMargin
             )
-            val findResult = eventMap.find {
+            val findResult = eventMap.find { //TODO change eventMap key for this command
               case (_, command) =>
                 command.command.isInstanceOf[Dial] &&
                   eventMessage.callerUniqueId.contains(command.command.asInstanceOf[Dial].uniqueId)
@@ -642,7 +642,7 @@ abstract class FSConnection extends StrictLogging {
                   })
                 .mkString("\n")}""".stripMargin
             )
-            val findResult = eventMap.find {
+            val findResult = eventMap.find { //TODO change eventMap key for this command
               case (_, command) =>
                 command.command.isInstanceOf[Dial] &&
                   eventMessage.callerUniqueId.contains(command.command.asInstanceOf[Dial].uniqueId)
