@@ -622,11 +622,11 @@ abstract class FSConnection extends StrictLogging {
             adapter.info(s"Command from map $findResult")
             findResult match {
               case Some((key, command)) =>
-                command.executeEvent.complete(Success(eventMessage))
+                if (!command.executeEvent.isCompleted) command.executeEvent.complete(Success(eventMessage))
                 if (command.executeComplete.isCompleted) eventMap.remove(key)
               case _ =>
             }
-          case Some(EventNames.ChannelCallState) =>
+          case Some(EventNames.ChannelCallState) if !eventMessage.answerState.contains(AnswerStates.Ringing) =>
             adapter.info(
               logMarker, s"""Channel call state event for callId
               |${eventMessage.headers("Caller-Unique-ID")}
@@ -650,7 +650,8 @@ abstract class FSConnection extends StrictLogging {
             adapter.info(s"Command from map $findResult")
             findResult match {
               case Some((key, command)) =>
-                  command.executeComplete.complete(Success(eventMessage))
+                  if (!command.executeComplete.isCompleted)
+                    command.executeComplete.complete(Success(eventMessage))
                   if (command.executeEvent.isCompleted) eventMap.remove(key)
               case _ =>
             }
