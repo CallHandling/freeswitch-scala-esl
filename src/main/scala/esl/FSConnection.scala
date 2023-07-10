@@ -283,7 +283,8 @@ abstract class FSConnection extends StrictLogging {
             )
             if (needToLinger) publishNonMappingCommand(LingerCommand)
             (
-              fsData
+              if(isInbound) fsData
+              else fsData
                 .copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),
               true
             )
