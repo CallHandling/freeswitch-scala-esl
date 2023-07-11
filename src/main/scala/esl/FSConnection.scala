@@ -70,10 +70,23 @@ abstract class FSConnection extends StrictLogging {
       : Seq[PartialFunction[FSCommandPublication, Unit]] =
     Seq.empty
 
+  private var onFsMsgCallbacks
+      : Seq[PartialFunction[(List[FSMessage], String, List[FSMessage]), Unit]] =
+    Seq.empty
+
   def onSendCommand(
       partialFunction: PartialFunction[FSCommandPublication, Unit]
   ): Unit = {
     onCommandCallbacks = onCommandCallbacks :+ partialFunction
+  }
+
+  def onReceiveMsg(
+      partialFunction: PartialFunction[
+        (List[FSMessage], String, List[FSMessage]),
+        Unit
+      ]
+  ): Unit = {
+    onFsMsgCallbacks = onFsMsgCallbacks :+ partialFunction
   }
 
   def logMarker =
@@ -270,7 +283,7 @@ abstract class FSConnection extends StrictLogging {
     )
     lazy val connectToFS = (fsData: FSData, hasConnected: Boolean) => {
       fsData.fsMessages match {
-        case ::(command: CommandReply, _)
+        case ::(command: CommandReply, remaining)
             if command.headers.contains(HeaderNames.uniqueId) || isInbound =>
           if (command.success) {
             val fsSocket = FSSocket(fsConnection, ChannelData(command.headers))
@@ -283,10 +296,12 @@ abstract class FSConnection extends StrictLogging {
             )
             if (needToLinger) publishNonMappingCommand(LingerCommand)
             (
-              if(isInbound) fsData
-              else fsData
-                .copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),
-              true
+              if (isInbound) fsData
+              else
+                fsData
+                  .copy(fsMessages = remaining),
+              true,
+              command :: Nil
             )
           } else {
             adapter.error(
@@ -300,15 +315,15 @@ abstract class FSConnection extends StrictLogging {
                 )
               )
             )
-            (fsData, hasConnected)
+            (fsData, hasConnected, Nil)
           }
-        case _ => (fsData, hasConnected)
+        case _ => (fsData, hasConnected, Nil)
       }
     }
 
     lazy val doLinger = (fsData: FSData, isLingering: Boolean) => {
       fsData.fsMessages match {
-        case ::(command: CommandReply, _) =>
+        case ::(command: CommandReply, remaining) =>
           adapter.info(
             logMarker,
             s"CALL ${callId} Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}"
@@ -316,13 +331,14 @@ abstract class FSConnection extends StrictLogging {
           if (command.success) {
             (
               fsData
-                .copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),
-              true
+                .copy(fsMessages = remaining),
+              true,
+              command :: Nil
             )
           } else {
-            (fsData, isLingering)
+            (fsData, isLingering, Nil)
           }
-        case _ => (fsData, isLingering)
+        case _ => (fsData, isLingering, Nil)
       }
     }
 
@@ -353,7 +369,7 @@ abstract class FSConnection extends StrictLogging {
         val buffer: mutable.ListBuffer[FSData] =
           mutable.ListBuffer.empty[FSData]
 
-        def filterFSMessages(fSData: FSData): FSData = {
+        def filterFSMessages(fSData: FSData): (FSData, List[FSMessage]) = {
           val (messagesWithSameId, messagesWithDifferentId) = {
             fSData.fsMessages.partition { message =>
               message.headers
@@ -380,7 +396,8 @@ abstract class FSConnection extends StrictLogging {
                 .mkString("\n----")}""".stripMargin
             )
           }
-          fSData.copy(fsMessages = messagesWithSameId)
+          fSData
+            .copy(fsMessages = messagesWithSameId) -> messagesWithDifferentId
         }
 
         fSData => {
@@ -397,22 +414,44 @@ abstract class FSConnection extends StrictLogging {
             )
           }
 
-
           val updatedFSData = {
             if (!hasConnected && !isConnect) {
               buffer.append(fSData)
+              onFsMsgCallbacks.foreach(
+                _.lift(
+                  fSData.fsMessages,
+                  s"ALL MSG BUFFERED : hasConnected=$hasConnected ; isConnect=$isConnect",
+                  Nil
+                )
+              )
               fSData.copy(fsMessages = Nil)
             } else if (!hasConnected && isConnect) {
-              val con = connectToFS(fSData, hasConnected)
-              hasConnected = con._2
+              val (newFsData, connected, droppedMsgs) =
+                connectToFS(fSData, hasConnected)
+              hasConnected = connected
               if (hasConnected) {
                 val allMessages = fSData.copy(fsMessages =
                   buffer.flatMap(_.fsMessages).toList ++ fSData.fsMessages
                 )
                 buffer.clear()
-                filterFSMessages(allMessages)
+                val (filteredFs, removedFsMsgs) = filterFSMessages(allMessages)
+                onFsMsgCallbacks.foreach(
+                  _.lift(
+                    fSData.fsMessages,
+                    s"NOW CONNECTED : hasConnected=$hasConnected ; isConnect=$isConnect ; ${filteredFs.fsMessages.length}/${allMessages.fsMessages.length} messages dropped",
+                    removedFsMsgs
+                  )
+                )
+                filteredFs
               } else {
-                buffer.append(con._1)
+                buffer.append(newFsData)
+                onFsMsgCallbacks.foreach(
+                  _.lift(
+                    fSData.fsMessages,
+                    s"ATTEMPT CONNECTION : hasConnected=$hasConnected ; isConnect=$isConnect; ${droppedMsgs.length}/${fSData.fsMessages.length} messages dropped",
+                    droppedMsgs
+                  )
+                )
                 fSData.copy(fsMessages = Nil)
               }
             } else if (
@@ -422,11 +461,30 @@ abstract class FSConnection extends StrictLogging {
                     a.replyText.getOrElse("") == "+OK will linger"
                 }
             ) {
-              val ling = doLinger(fSData, isLingering)
-              isLingering = ling._2
-              filterFSMessages(ling._1)
+              val (newFsData, lingered, droppedMsgs) =
+                doLinger(fSData, isLingering)
+              isLingering = lingered
+
+              val (filteredFs, removedFsMsgs) = filterFSMessages(newFsData)
+              val allDroppedMessages = droppedMsgs ::: removedFsMsgs
+              onFsMsgCallbacks.foreach(
+                _.lift(
+                  fSData.fsMessages,
+                  s"LINGERED : hasConnected=$hasConnected ; isConnect=$isConnect; ${allDroppedMessages.length}/${fSData.fsMessages.length} messages dropped",
+                  allDroppedMessages
+                )
+              )
+              filteredFs
             } else {
-              filterFSMessages(fSData)
+              val (filteredFs, removedFsMsgs) = filterFSMessages(fSData)
+              onFsMsgCallbacks.foreach(
+                _.lift(
+                  fSData.fsMessages,
+                  s"NORMAL PROCESSING : hasConnected=$hasConnected ; isConnect=$isConnect; ${removedFsMsgs.length}/${fSData.fsMessages.length} messages dropped",
+                  removedFsMsgs
+                )
+              )
+              filteredFs
             }
           }
           List(
@@ -559,9 +617,7 @@ abstract class FSConnection extends StrictLogging {
       case _ =>
         eventMessage.eventName match {
           case Some(EventNames.Api) =>
-            if (
-              eventMessage.apiCommand.contains("create_uuid")
-            ) {
+            if (eventMessage.apiCommand.contains("create_uuid")) {
               val queuedCommand = eventMap
                 .find { //TODO change eventMap key for this command
                   case (_, command) => command.command.isInstanceOf[CreateUUID]
@@ -613,58 +669,61 @@ abstract class FSConnection extends StrictLogging {
               s"""Channel state event for callId
                  |${eventMessage.headers("Caller-Unique-ID")}
                  |>> MAP command is below
-                 |${
-                eventMap
-                  .map({ item =>
-                    s"""appId: ${item._1}
+                 |${eventMap
+                .map({ item =>
+                  s"""appId: ${item._1}
                        |command
-                       |${
-                      item._2.command
-                    }
+                       |${item._2.command}
                        |command type ${item._2.command.getClass}""".stripMargin
-                  })
-                  .mkString("\n")
-              }""".stripMargin
+                })
+                .mkString("\n")}""".stripMargin
             )
-            val findResult = eventMap.find { //TODO change eventMap key for this command
-              case (_, command) =>
-                command.command.isInstanceOf[Dial] &&
-                  eventMessage.callerUniqueId.contains(command.command.asInstanceOf[Dial].uniqueId)
-            }
+            val findResult =
+              eventMap.find { //TODO change eventMap key for this command
+                case (_, command) =>
+                  command.command.isInstanceOf[Dial] &&
+                    eventMessage.callerUniqueId.contains(
+                      command.command.asInstanceOf[Dial].uniqueId
+                    )
+              }
             adapter.info(s"Command from map $findResult")
             findResult match {
               case Some((key, command)) =>
-                if (!command.executeEvent.isCompleted) command.executeEvent.complete(Success(eventMessage))
+                if (!command.executeEvent.isCompleted)
+                  command.executeEvent.complete(Success(eventMessage))
                 if (command.executeComplete.isCompleted) eventMap.remove(key)
               case _ =>
             }
-          case Some(EventNames.ChannelCallState) if !eventMessage.answerState.contains(AnswerStates.Ringing) =>
+          case Some(EventNames.ChannelCallState)
+              if !eventMessage.answerState.contains(AnswerStates.Ringing) =>
             adapter.info(
-              logMarker, s"""Channel call state event for callId
+              logMarker,
+              s"""Channel call state event for callId
               |${eventMessage.headers("Caller-Unique-ID")}
               |>> MAP command is below
               |${eventMap
-                  .map({ item =>
-                    s"""appId: ${item._1}
+                .map({ item =>
+                  s"""appId: ${item._1}
                     |command
-                    |${
-                      item._2.command
-                    }
+                    |${item._2.command}
                     |command type ${item._2.command.getClass}""".stripMargin
-                  })
+                })
                 .mkString("\n")}""".stripMargin
             )
-            val findResult = eventMap.find { //TODO change eventMap key for this command
-              case (_, command) =>
-                command.command.isInstanceOf[Dial] &&
-                  eventMessage.callerUniqueId.contains(command.command.asInstanceOf[Dial].uniqueId)
-            }
+            val findResult =
+              eventMap.find { //TODO change eventMap key for this command
+                case (_, command) =>
+                  command.command.isInstanceOf[Dial] &&
+                    eventMessage.callerUniqueId.contains(
+                      command.command.asInstanceOf[Dial].uniqueId
+                    )
+              }
             adapter.info(s"Command from map $findResult")
             findResult match {
               case Some((key, command)) =>
-                  if (!command.executeComplete.isCompleted)
-                    command.executeComplete.complete(Success(eventMessage))
-                  if (command.executeEvent.isCompleted) eventMap.remove(key)
+                if (!command.executeComplete.isCompleted)
+                  command.executeComplete.complete(Success(eventMessage))
+                if (command.executeEvent.isCompleted) eventMap.remove(key)
               case _ =>
             }
 

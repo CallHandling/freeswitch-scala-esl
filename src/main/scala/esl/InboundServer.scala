@@ -109,7 +109,7 @@ class InboundServer(
     * Open a client connection for given interface and port
     *
     * @param sink materialize upstream element
-    * @param flow flow from source to bi-directional
+    * @param flow flow from fsCommandSource to bi-directional
     * @tparam T1 element materialize from upstream
     * @tparam T2 element publish to downstream
     * @return
@@ -123,11 +123,11 @@ class InboundServer(
       )
   ) = {
     val clientFlow = Tcp().outgoingConnection(interface, port)
-    val (upStreamCompletion, source, protocol) = flow
+    val (upStreamCompletion, fsCommandSource, protocol) = flow
     val flowWithProtocol: Flow[T2, T1, Future[Tcp.OutgoingConnection]] =
       clientFlow
         .joinMat(protocol)(Keep.left)
-    val (m1, m2) = flowWithProtocol.runWith(source, sink)
+    val (m1, m2) = flowWithProtocol.runWith(fsCommandSource, sink)
     (upStreamCompletion, m1, m2)
 
   }
