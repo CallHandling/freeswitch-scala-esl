@@ -556,7 +556,121 @@ abstract class FSConnection extends StrictLogging {
           }
         }
       }
-      case _ => {
+      case _ =>
+        eventMessage.eventName match {
+          case Some(EventNames.Api) =>
+            if (
+              eventMessage.apiCommand.contains("create_uuid")
+            ) {
+              val queuedCommand = eventMap
+                .find { //TODO change eventMap key for this command
+                  case (_, command) => command.command.isInstanceOf[CreateUUID]
+                }
+                .map {
+                  case (key, command) =>
+                    command.executeEvent.complete(Success(eventMessage))
+                    (key, command)
+                }
+              if (
+                queuedCommand.isDefined && queuedCommand.get._2.executeComplete.isCompleted
+              )
+                eventMap.remove(queuedCommand.get._1)
+            }
+          case Some(EventNames.BackgroundJob) =>
+            val jobId = eventMap.get(eventMessage.jobUuid.getOrElse(""))
+            jobId match {
+              case Some(job) =>
+                job.executeComplete.complete(Success(eventMessage))
+                if (job.executeEvent.isCompleted)
+                  eventMap.remove(job.command.eventUuid)
+                adapter.info(
+                  logMarker,
+                  s"""handleFSEventMessage for background job id $jobId Removing entry
+                     |>> TYPE
+                     |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                     |>> HEADERS
+                     |${eventMessage.headers
+                    .map(h => h._1 + " : " + h._2)
+                    .mkString(space, "\n" + space, "")}
+                     |>> BODY
+                     |${eventMessage.body}
+                     |>> MAP is below
+                     |${eventMap
+                    .map({ item =>
+                      s"""appId: ${item._1}
+                           |command
+                           |${item._2.command}""".stripMargin
+                    })
+                    .mkString("\n")}""".stripMargin
+                )
+              case _ =>
+                adapter.debug(logMarker, "Background job for unknown command")
+
+            }
+          case Some(EventNames.ChannelState) =>
+            adapter.info(
+              logMarker,
+              s"""Channel state event for callId
+                 |${eventMessage.headers("Caller-Unique-ID")}
+                 |>> MAP command is below
+                 |${
+                eventMap
+                  .map({ item =>
+                    s"""appId: ${item._1}
+                       |command
+                       |${
+                      item._2.command
+                    }
+                       |command type ${item._2.command.getClass}""".stripMargin
+                  })
+                  .mkString("\n")
+              }""".stripMargin
+            )
+            val findResult = eventMap.find { //TODO change eventMap key for this command
+              case (_, command) =>
+                command.command.isInstanceOf[Dial] &&
+                  eventMessage.callerUniqueId.contains(command.command.asInstanceOf[Dial].uniqueId)
+            }
+            adapter.info(s"Command from map $findResult")
+            findResult match {
+              case Some((key, command)) =>
+                if (!command.executeEvent.isCompleted) command.executeEvent.complete(Success(eventMessage))
+                if (command.executeComplete.isCompleted) eventMap.remove(key)
+              case _ =>
+            }
+          case Some(EventNames.ChannelCallState) if !eventMessage.answerState.contains(AnswerStates.Ringing) =>
+            adapter.info(
+              logMarker, s"""Channel call state event for callId
+              |${eventMessage.headers("Caller-Unique-ID")}
+              |>> MAP command is below
+              |${eventMap
+                  .map({ item =>
+                    s"""appId: ${item._1}
+                    |command
+                    |${
+                      item._2.command
+                    }
+                    |command type ${item._2.command.getClass}""".stripMargin
+                  })
+                .mkString("\n")}""".stripMargin
+            )
+            val findResult = eventMap.find { //TODO change eventMap key for this command
+              case (_, command) =>
+                command.command.isInstanceOf[Dial] &&
+                  eventMessage.callerUniqueId.contains(command.command.asInstanceOf[Dial].uniqueId)
+            }
+            adapter.info(s"Command from map $findResult")
+            findResult match {
+              case Some((key, command)) =>
+                  if (!command.executeComplete.isCompleted)
+                    command.executeComplete.complete(Success(eventMessage))
+                  if (command.executeEvent.isCompleted) eventMap.remove(key)
+              case _ =>
+            }
+
+          case _ =>
+            adapter.info(logMarker, "other event")
+        }
         adapter.debug(
           logMarker,
           s"""handleFSEventMessage Unable to find application id header for event message
@@ -569,7 +683,6 @@ abstract class FSConnection extends StrictLogging {
              |>> BODY
              |${eventMessage.body}""".stripMargin
         )
-      }
     }
 
     eventMessage
@@ -721,9 +834,10 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def break(
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
+      config: ApplicationCommandConfig = ApplicationCommandConfig(),
+      app: Option[String] = Option.empty
   ): Future[CommandResponse] =
-    publishCommand(Break(config))
+    publishCommand(Break(config, app))
 
   /**
     * Answer the call for a channel.This sets up duplex audio between the calling ''A'' leg and the FreeSwitch server.
@@ -792,6 +906,18 @@ abstract class FSConnection extends StrictLogging {
   ): Future[CommandResponse] = {
     setOriginatedCallIds(uuid)
     publishCommand(FilterUUId(uuid, config))
+  }
+  def createUUID(
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] = {
+    publishCommand(CreateUUID(config))
+  }
+
+  def filterX(
+      filter: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] = {
+    publishCommand(FilterX(filter, config))
   }
 
   /**
