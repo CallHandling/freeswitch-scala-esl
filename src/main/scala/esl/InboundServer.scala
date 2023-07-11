@@ -23,7 +23,8 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source, Tcp}
 import akka.util.ByteString
 import com.typesafe.config.Config
-import esl.FSConnection.{FSData, FSSocket}
+import esl.FSConnection.{FSCommandPublication, FSData, FSSocket}
+import esl.domain.FSMessage
 
 import java.util.UUID
 import scala.concurrent.duration._
@@ -139,10 +140,19 @@ class InboundServer(
     * @param fun      function will get freeswitch outbound connection after injecting sink
     * @return Future[(UpSourceCompletionFuture, DownStreamCompletionFuture)]
     */
-  def connect[Mat](password: String)(
+  def connect[Mat](
+      password: String,
+      onSendCommand: Option[PartialFunction[FSCommandPublication, Unit]] = None,
+      onFsMsg: Option[
+        PartialFunction[(List[FSMessage], String, List[FSMessage]), Unit]
+      ] = None
+  )(
       fun: (String, Future[FSSocket[InboundFSConnection]]) => Sink[FSData, Mat]
   ): Future[(Future[Done], Future[Mat])] = {
     val fsConnection = InboundFSConnection(enableDebugLogs)
+
+    onFsMsg.foreach(fsConnection.onReceiveMsg)
+    onSendCommand.foreach(fsConnection.onSendCommand)
 
     fsConnection
       .connect(password)
@@ -170,7 +180,10 @@ class InboundServer(
             )
           case Success(_) =>
             adapter
-              .info("callId {} upstream to freeswitch complete successfuly", callId)
+              .info(
+                "callId {} upstream to freeswitch complete successfuly",
+                callId
+              )
         })
 
         downCompF.onComplete({
@@ -182,7 +195,10 @@ class InboundServer(
             )
           case Success(_) =>
             adapter
-              .info("callId {} upstream to freeswitch complete successfuly", callId)
+              .info(
+                "callId {} upstream to freeswitch complete successfuly",
+                callId
+              )
         })
         (upCompF, downCompF)
       }
