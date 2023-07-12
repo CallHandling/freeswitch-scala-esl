@@ -32,6 +32,7 @@ import esl.parser.{DefaultParser, Parser}
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import scala.concurrent.{
+  Await,
   ExecutionContextExecutor,
   Future,
   Promise,
@@ -123,6 +124,15 @@ abstract class FSConnection extends StrictLogging {
       Supervision.Stop
     }
   }
+
+  /**
+    * Send auth command to freeswitch
+    *
+    * @param password : String
+    * @return Future[CommandResponse]
+    */
+  private[esl] def connect(password: String): Future[QueueOfferResult] =
+    publishNonMappingCommand(AuthCommand(password))
 
   protected[this] lazy val (queue, source) = {
     val sourceStage1 = Source
@@ -286,14 +296,15 @@ abstract class FSConnection extends StrictLogging {
         case ::(command: CommandReply, remaining)
             if command.headers.contains(HeaderNames.uniqueId) || isInbound =>
           if (command.success) {
-            val fsSocket = FSSocket(fsConnection, ChannelData(command.headers))
-            fsSocket.fsConnection.setConnectionId(
-              if (isInbound) callId
-              else fsSocket.channelData.headers(HeaderNames.uniqueId)
-            )
-            fsConnectionPromise.complete(
-              Success(fsSocket)
-            )
+            if(!isInbound) {
+              val fsSocket = FSSocket(fsConnection, ChannelData(command.headers))
+              fsSocket.fsConnection.setConnectionId(
+                fsSocket.channelData.headers(HeaderNames.uniqueId)
+              )
+              fsConnectionPromise.complete(
+                Success(fsSocket)
+              )
+            }
             if (needToLinger) publishNonMappingCommand(LingerCommand)
             (
               if (isInbound) fsData
@@ -402,6 +413,9 @@ abstract class FSConnection extends StrictLogging {
 
         fSData => {
 
+          val (authRequest, remaining) = fSData.fsMessages
+            .partition(_.contentType == esl.domain.ContentTypes.authRequest)
+
           val cmdReplies = getCmdReplies(fSData)
 
           val isConnect = {
@@ -415,7 +429,30 @@ abstract class FSConnection extends StrictLogging {
           }
 
           val updatedFSData = {
-            if (!hasConnected && !isConnect) {
+            if (authRequest.nonEmpty) {
+              buffer.append(fSData.copy(fsMessages = remaining))
+              onFsMsgCallbacks.foreach(
+                _.lift(
+                  fSData.fsMessages,
+                  s"""AUTH REQUEST MSG BUFFERED : hasConnected=$hasConnected ; isConnect=$isConnect
+                     |auth posted using password """.stripMargin,
+                  authRequest
+                )
+              )
+              Await.result(fsConnection.connect("ClueCon"), Duration.Inf)
+              if (isInbound) {
+                fsConnection.setConnectionId(callId)
+                fsConnectionPromise.complete(
+                  Success(
+                    FSSocket(
+                      fsConnection,
+                      ChannelData(Map(HeaderNames.uniqueId -> callId))
+                    )
+                  )
+                )
+              }
+              fSData.copy(fsMessages = Nil)
+            } else if (!hasConnected && !isConnect) {
               buffer.append(fSData)
               onFsMsgCallbacks.foreach(
                 _.lift(
@@ -438,7 +475,7 @@ abstract class FSConnection extends StrictLogging {
                 onFsMsgCallbacks.foreach(
                   _.lift(
                     fSData.fsMessages,
-                    s"NOW CONNECTED : hasConnected=$hasConnected ; isConnect=$isConnect ; ${filteredFs.fsMessages.length}/${allMessages.fsMessages.length} messages dropped",
+                    s"NOW CONNECTED : hasConnected=$hasConnected ; isConnect=$isConnect ; ${removedFsMsgs.length}/${allMessages.fsMessages.length} messages dropped",
                     removedFsMsgs
                   )
                 )
@@ -761,25 +798,15 @@ abstract class FSConnection extends StrictLogging {
     val offerF = queue
       .offer(command)
 
-    if (onCommandCallbacks.nonEmpty) {
-      offerF
-        .map({ offer =>
-          onCommandCallbacks
-            .foreach(
-              _.lift(FireAndForgetFSCommand(command, Success(offer)))
-            )
-          offer
-        })
-        .recoverWith({
-          case e => {
-            onCommandCallbacks
-              .foreach(_.lift(FireAndForgetFSCommand(command, Failure(e))))
-            Future.failed(e)
-          }
-        })
-    } else {
-      offerF
-    }
+    onCommandCallbacks
+      .foreach(
+        _.lift(
+          FireAndForgetFSCommand(command, offerF)
+        )
+      )
+
+    offerF
+
   }
 
   /**
@@ -791,56 +818,46 @@ abstract class FSConnection extends StrictLogging {
   private def publishCommand(command: FSCommand): Future[CommandResponse] = {
     val offerF = queue
       .offer(command)
-      .map({ offer =>
-        val (commandReply, commandToQueue, cmdResponse) =
-          buildCommandAndResponse(command)
-        commandQueue.enqueue(commandReply)
-        val appId = command.eventUuid
-        eventMap.put(appId, commandToQueue)
-        adapter.info(
-          logMarker,
-          s"""publishCommand for app id $appId Added to lookup
-             |>> COMMAND
-             |$command
-             |>> MAP is now
-             |${eventMap
-            .map({ item =>
-              s"""appId: ${item._1}
-               |command
-               |${item._2.command}""".stripMargin
-            })
-            .mkString("\n")}""".stripMargin
-        )
-        onCommandCallbacks
-          .foreach(
-            _.lift(
-              AwaitingFSCommand(
-                command,
-                Success(
-                  offer -> AwaitFSCommandResponse(
-                    cmdResponse.commandReply,
-                    cmdResponse.executeEvent,
-                    cmdResponse.executeComplete
-                  )
-                )
-              )
-            )
+      .flatMap({
+        case QueueOfferResult.Enqueued => {
+          val (commandReply, commandToQueue, cmdResponse) =
+            buildCommandAndResponse(command)
+          commandQueue.enqueue(commandReply)
+          val appId = command.eventUuid
+          eventMap.put(appId, commandToQueue)
+          adapter.info(
+            logMarker,
+            s"""publishCommand for app id $appId Enqueued and Added to lookup
+                 |>> COMMAND
+                 |$command
+                 |>> MAP is now
+                 |${eventMap
+              .map({ item =>
+                s"""appId: ${item._1}
+                       |command
+                       |${item._2.command}""".stripMargin
+              })
+              .mkString("\n")}""".stripMargin
           )
-        cmdResponse
+          Future.successful(cmdResponse)
+        }
+        case QueueOfferResult.Failure(cause) => {
+          Future.failed(
+            new Exception(s"""Command ${command.eventUuid} failed on offer
+               |$command""".stripMargin, cause)
+          )
+        }
+        case offer => {
+          Future.failed(
+            new Exception(s"""Command ${command.eventUuid} $offer on offer
+               |$command""".stripMargin)
+          )
+        }
       })
 
-    if (onCommandCallbacks.nonEmpty) {
-      offerF
-        .recoverWith({
-          case e => {
-            onCommandCallbacks
-              .foreach(_.lift(AwaitingFSCommand(command, Failure(e))))
-            Future.failed(e)
-          }
-        })
-    } else {
-      offerF
-    }
+    onCommandCallbacks.foreach(_.lift(AwaitingFSCommand(command, offerF)))
+
+    offerF
 
   }
 
@@ -1288,12 +1305,12 @@ object FSConnection {
 
   case class FireAndForgetFSCommand(
       command: FSCommand,
-      queueOfferResult: Try[QueueOfferResult]
+      queueOfferResult: Future[QueueOfferResult]
   ) extends FSCommandPublication
 
   case class AwaitingFSCommand(
       command: FSCommand,
-      result: Try[(QueueOfferResult, AwaitFSCommandResponse)]
+      result: Future[CommandResponse]
   ) extends FSCommandPublication
 
   case class AwaitFSCommandResponse(

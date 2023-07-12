@@ -168,10 +168,16 @@ class OutboundServer(
       ) => Sink[FSData, Mat],
       onFsConnectionStart: OutboundServer.OnConnectionCallBack[Mat] =
         OutboundServer.OnConnectionCallBack.noop,
-      onSendCommand: Option[PartialFunction[FSCommandPublication, Unit]] = None,
-      onFsMsg: Option[
-        PartialFunction[(List[FSMessage], String, List[FSMessage]), Unit]
-      ] = None
+      onSendCommand: Option[
+        (
+            String,
+            OutboundFSConnection
+        ) => PartialFunction[FSCommandPublication, Unit]
+      ] = None,
+      onFsMsg: Option[(String, OutboundFSConnection) => PartialFunction[
+        (List[FSMessage], String, List[FSMessage]),
+        Unit
+      ]] = None
   ): Future[Tcp.ServerBinding] =
     server(
       fun,
@@ -201,21 +207,27 @@ class OutboundServer(
           BidiFlow[ByteString, FSData, T, ByteString, NotUsed]
       ),
       onFsConnectionStart: OutboundServer.OnConnectionCallBack[Mat1],
-      onSendCommand: Option[PartialFunction[FSCommandPublication, Unit]] = None,
-      onFsMsg: Option[
-        PartialFunction[(List[FSMessage], String, List[FSMessage]), Unit]
-      ] = None
+      onSendCommand: Option[
+        (
+            String,
+            OutboundFSConnection
+        ) => PartialFunction[FSCommandPublication, Unit]
+      ] = None,
+      onFsMsg: Option[(String, OutboundFSConnection) => PartialFunction[
+        (List[FSMessage], String, List[FSMessage]),
+        Unit
+      ]] = None
   ): Future[Tcp.ServerBinding] = {
 
     val sink = Sink.foreach[IncomingConnection] { connection =>
       val fsConnection = OutboundFSConnection(enableDebugLogs)
-
-      onFsMsg.foreach(fsConnection.onReceiveMsg)
-      onSendCommand.foreach(fsConnection.onSendCommand)
+      val callId = UUID.randomUUID().toString.replace("-","")
+      onFsMsg.foreach(fn => fsConnection.onReceiveMsg(fn(callId, fsConnection)))
+      onSendCommand.foreach(fn =>
+        fsConnection.onSendCommand(fn(callId, fsConnection))
+      )
 
       fsConnection.connect().map { _ =>
-        val callId = UUID.randomUUID().toString
-
         lazy val sink = fsConnection.init(
           callId,
           Promise[FSSocket[OutboundFSConnection]](),

@@ -34,14 +34,7 @@ case class InboundFSConnection(enableDebugLogs: Boolean)(implicit
   override implicit val system: ActorSystem = actorSystem
   override implicit val adapter: MarkerLoggingAdapter = adapterIn
 
-  /**
-    * Send auth command to freeswitch
-    *
-    * @param password : String
-    * @return Future[CommandResponse]
-    */
-  private[esl] def connect(password: String): Future[QueueOfferResult] =
-    publishNonMappingCommand(AuthCommand(password))
+
 
   override def play(
       fileName: String,

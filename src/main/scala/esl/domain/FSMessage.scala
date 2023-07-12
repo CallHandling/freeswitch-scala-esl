@@ -49,11 +49,11 @@ case class CommandReply(basicMessage: BasicMessage) extends FSMessage {
   override val contentLength: Int = basicMessage.contentLength
   override val contentType: String = basicMessage.contentType
 
-  val replyText = headers.lift(HeaderNames.replyText)
+  lazy val replyText = headers.lift(HeaderNames.replyText)
 
   lazy val success: Boolean = replyText.exists(f => f.charAt(0) == '+' || f == "%2BOK%0A")
 
-  val errorMessage: String = replyText.collect {
+  lazy val errorMessage: String = replyText.collect {
     case text if text.startsWith("-ERR") => text.substring(5, text.length - 5)
   }.getOrElse("")
 
