@@ -317,7 +317,7 @@ object CallCommands {
     override val application: String = "set"
     override lazy val args: String = {
       val vars = Seq(
-        "ignore_early_media=true",
+        "ignore_early_media=ring_ready",
         s"originate_timeout=${timeout.toSeconds}",
         s"origination_uuid=$uniqueId"
       ) ++
@@ -325,7 +325,7 @@ object CallCommands {
         retries.map(_.asOriginateArgs).getOrElse(Nil)
 
       s"""dial_$eventUuid=$${
-         |bgapi originate {${vars.asVarsString}}$target &park()
+         |bgapi originate ${vars.asVarsString}$target &park()
          |Job-UUID: $eventUuid
          |}""".stripMargin
     }
