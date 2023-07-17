@@ -407,7 +407,7 @@ object CallCommands {
 
   final case class CreateUUID(config: ApplicationCommandConfig)
     extends FSCommand {
-    override def toString: String =s"bgapi create_uuid${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
+    override def toString: String =s"bgapi create_uuid $eventUuid${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }
 
   /**

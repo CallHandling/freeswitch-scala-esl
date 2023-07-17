@@ -638,24 +638,14 @@ abstract class FSConnection extends StrictLogging {
              |>> BODY
              |${eventMessage.body}""".stripMargin
         )
-      //case (_, Some(CommandToQueue(command: CreateUUID, executeEvent, executeComplete)), _, Some(EventNames.Api)) =>
-      //case (_, Some(CommandToQueue(command: CreateUUID, executeEvent, executeComplete)), _, Some(EventNames.BackgroundJob))
-      //  if eventMessage.jobUuid.fold(false)(_ == command.eventUuid) =>
       case (_, _, _, Some(EventNames.Api)) =>
-        if (eventMessage.apiCommand.contains("create_uuid")) {
-          val queuedCommand = eventMap
-            .find { //TODO change eventMap key for this command
-              case (_, command) => command.command.isInstanceOf[CreateUUID]
-            }
-            .map {
-              case (key, command) =>
-                command.executeEvent.complete(Success(eventMessage))
-                (key, command)
-            }
-          if (
-            queuedCommand.isDefined && queuedCommand.get._2.executeComplete.isCompleted
-          )
-            eventMap.remove(queuedCommand.get._1)
+        if (eventMessage.apiCommand.contains("create_uuid") && eventMessage.headers.contains("API-Command-Argument")) {
+
+          val queuedCommand = eventMap.get(eventMessage.headers("API-Command-Argument"))
+          queuedCommand.map {
+            case CommandToQueue(_: CreateUUID, executeEvent, _) =>
+              executeEvent.complete(Success(eventMessage))
+          }
         }
       case (_, _, _, Some(EventNames.BackgroundJob)) if eventMap.contains(eventMessage.jobUuid.getOrElse("")) =>
         val jobId = eventMap.get(eventMessage.jobUuid.getOrElse(""))
