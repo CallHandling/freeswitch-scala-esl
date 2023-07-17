@@ -317,7 +317,7 @@ object CallCommands {
     override val application: String = "set"
     override lazy val args: String = {
       val vars = Seq(
-        "ignore_early_media=ring_ready",
+        "ignore_early_media=true",
         s"originate_timeout=${timeout.toSeconds}",
         s"origination_uuid=$uniqueId"
       ) ++

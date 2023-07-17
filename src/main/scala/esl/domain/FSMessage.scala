@@ -122,7 +122,10 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
   val hangupCause: Option[HangupCauses.HangupCause] =
     headers.get(HeaderNames.hangupCause).fold(Option.empty[HangupCauses.HangupCause])(HangupCauses.causes.lift)
 
-  val applicationUuid: Option[String] = headers.get(HeaderNames.applicationUuid)
+  val applicationUuid: Option[String] = headers.get(HeaderNames.applicationUuid).flatMap({
+    case x if x.trim.isEmpty  => None
+    case x => Some(x.trim)
+  })
 
   val jobUuid: Option[String] = headers.get(HeaderNames.jobUUID)
 
