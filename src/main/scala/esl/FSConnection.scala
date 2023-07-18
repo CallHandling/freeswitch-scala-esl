@@ -185,13 +185,22 @@ abstract class FSConnection extends StrictLogging {
         var unParsedBuffer: String = ""
         data => {
           try {
-            val fsPacket = data.utf8String
-            val (messages, buffer) = parser.parse(unParsedBuffer + fsPacket)
+            val (messages, buffer) =
+              parser.parse(unParsedBuffer + data.utf8String)
             unParsedBuffer = buffer
+            /*onFsMsgCallbacks.foreach(
+              _.lift(
+                (messages, "ALL MSGS FROM FS : WILL FIND DUPLICATE BELOW", Nil)
+              )
+            )*/
             List(FSData(self, messages))
           } catch {
             case e: Exception => {
               adapter.error(logMarker, e.getMessage, e)
+              onFsMsgCallbacks.foreach(_.lift((Nil, s"""ERROR PARSING fs events
+                  |---------------------
+                  |${unParsedBuffer + data.utf8String}
+                  |---------------------""".stripMargin, Nil)))
               List(FSData(self, List(NoneMessage())))
             }
           }
@@ -291,13 +300,19 @@ abstract class FSConnection extends StrictLogging {
           case success => success
         })
     )
+
     lazy val connectToFS = (fsData: FSData, hasConnected: Boolean) => {
       fsData.fsMessages match {
         case ::(command: CommandReply, remaining)
-            if command.headers.contains(HeaderNames.uniqueId) || isInbound =>
+            if command.headers.contains(
+              HeaderNames.uniqueId
+            ) || (isInbound && command.replyText.fold(false)(
+              _ == "+OK accepted"
+            )) =>
           if (command.success) {
-            if(!isInbound) {
-              val fsSocket = FSSocket(fsConnection, ChannelData(command.headers))
+            if (!isInbound) {
+              val fsSocket =
+                FSSocket(fsConnection, ChannelData(command.headers))
               fsSocket.fsConnection.setConnectionId(
                 fsSocket.channelData.headers(HeaderNames.uniqueId)
               )
@@ -307,10 +322,7 @@ abstract class FSConnection extends StrictLogging {
             }
             if (needToLinger) publishNonMappingCommand(LingerCommand)
             (
-              if (isInbound) fsData
-              else
-                fsData
-                  .copy(fsMessages = remaining),
+              fsData.copy(fsMessages = remaining),
               true,
               command :: Nil
             )
@@ -353,8 +365,42 @@ abstract class FSConnection extends StrictLogging {
       }
     }
 
-    val getCmdReplies: FSData => List[FSMessage] = (fSData: FSData) => {
-      fSData.fsMessages.filter(a => a.contentType == ContentTypes.commandReply)
+    def processLingered(command: CommandReply) = {
+      adapter.info(
+        logMarker,
+        s"CALL ${callId} Reply of linger command, ${command}, promise status: ${fsConnectionPromise.isCompleted}"
+      )
+      command.success
+    }
+
+    def performConnection(
+        command: CommandReply,
+        isConnectingForFirstTime: Boolean
+    ) = {
+      if (isConnectingForFirstTime) {
+        if (command.success) {
+          if (!isInbound) {
+            fsConnection.setConnectionId(command.headers(HeaderNames.uniqueId))
+            fsConnectionPromise.complete(
+              Success(FSSocket(fsConnection, ChannelData(command.headers)))
+            )
+          }
+          if (needToLinger) publishNonMappingCommand(LingerCommand)
+        } else {
+          adapter.error(
+            logMarker,
+            s"CALL ${callId}Socket failed to make connection with an error: ${command.errorMessage}"
+          )
+          fsConnectionPromise.complete(
+            Failure(
+              new Exception(
+                s"CALL ${callId}Socket failed to make connection with an error: ${command.errorMessage}"
+              )
+            )
+          )
+        }
+      }
+      command.success
     }
 
     def freeSwitchMsgToString(msg: FSMessage): String = {
@@ -375,6 +421,7 @@ abstract class FSConnection extends StrictLogging {
     Flow[FSData]
       .statefulMapConcat(() => {
         var hasConnected: Boolean = false
+        var wasOnceConnected: Boolean = false
         var isLingering: Boolean = false
         var isFiltering: Boolean = false
         val buffer: mutable.ListBuffer[FSData] =
@@ -413,115 +460,136 @@ abstract class FSConnection extends StrictLogging {
 
         fSData => {
 
-          val (authRequest, remaining) = fSData.fsMessages
-            .partition(_.contentType == esl.domain.ContentTypes.authRequest)
-
-          val cmdReplies = getCmdReplies(fSData)
-
-          val isConnect = {
-            cmdReplies.foldLeft(false)((_, b) =>
-              if (isInbound) {
-                b.asInstanceOf[CommandReply].success
-              } else {
-                b.headers.contains(HeaderNames.uniqueId)
-              }
-            )
-          }
-
           val updatedFSData = {
+
+            lazy val (authRequest, allMsgsOtherThanAuthRequest) =
+              fSData.fsMessages
+                .partition(
+                  _.contentType == esl.domain.ContentTypes.authRequest
+                )
+
             if (authRequest.nonEmpty) {
-              buffer.append(fSData.copy(fsMessages = remaining))
+              buffer.append(
+                fSData.copy(fsMessages = allMsgsOtherThanAuthRequest)
+              )
               onFsMsgCallbacks.foreach(
                 _.lift(
                   fSData.fsMessages,
-                  s"""AUTH REQUEST MSG BUFFERED : hasConnected=$hasConnected ; isConnect=$isConnect
-                     |auth posted using password """.stripMargin,
+                  s"AUTH REQUEST MSG BUFFERED : wasOnceConnected=$hasConnected ; will mark as not connected now ; hasConnected=false",
                   authRequest
                 )
               )
-              Await.result(fsConnection.connect("ClueCon"), Duration.Inf)
-              if (isInbound) {
-                fsConnection.setConnectionId(callId)
-                fsConnectionPromise.complete(
-                  Success(
-                    FSSocket(
-                      fsConnection,
-                      ChannelData(Map(HeaderNames.uniqueId -> callId))
-                    )
+              fsConnectionPromise.complete(
+                Success(
+                  FSSocket(
+                    fsConnection,
+                    ChannelData(Map(HeaderNames.uniqueId -> callId))
                   )
-                )
-              }
-              fSData.copy(fsMessages = Nil)
-            } else if (!hasConnected && !isConnect) {
-              buffer.append(fSData)
-              onFsMsgCallbacks.foreach(
-                _.lift(
-                  fSData.fsMessages,
-                  s"ALL MSG BUFFERED : hasConnected=$hasConnected ; isConnect=$isConnect",
-                  Nil
                 )
               )
+              fsConnection.connect("ClueCon")
+              hasConnected = false
               fSData.copy(fsMessages = Nil)
-            } else if (!hasConnected && isConnect) {
-              val (newFsData, connected, droppedMsgs) =
-                connectToFS(fSData, hasConnected)
-              hasConnected = connected
-              if (hasConnected) {
-                val allMessages = fSData.copy(fsMessages =
-                  buffer.flatMap(_.fsMessages).toList ++ fSData.fsMessages
+            } else if (!hasConnected) {
+
+              lazy val (connection, allMsgsOtherThanConnection) = {
+                if (isInbound || wasOnceConnected) {
+                  fSData.fsMessages.partition({
+                    case cmd: CommandReply =>
+                      cmd.replyText.fold(false)(_ == "+OK accepted")
+                  })
+                } else {
+                  fSData.fsMessages.partition({
+                    case cmd: CommandReply =>
+                      cmd.headers
+                        .contains(HeaderNames.uniqueId) && cmd.eventName
+                        .fold(false)(_ == "CHANNEL_DATA")
+                  })
+                }
+              }
+
+              if (connection.nonEmpty) {
+                hasConnected = performConnection(
+                  connection.head.asInstanceOf[CommandReply],
+                  !wasOnceConnected
                 )
-                buffer.clear()
-                val (filteredFs, removedFsMsgs) = filterFSMessages(allMessages)
-                onFsMsgCallbacks.foreach(
-                  _.lift(
-                    fSData.fsMessages,
-                    s"NOW CONNECTED : hasConnected=$hasConnected ; isConnect=$isConnect ; ${removedFsMsgs.length}/${allMessages.fsMessages.length} messages dropped",
-                    removedFsMsgs
+                wasOnceConnected = true
+                if (hasConnected) {
+                  val allMessages = fSData.copy(fsMessages =
+                    buffer
+                      .flatMap(_.fsMessages)
+                      .toList ++ allMsgsOtherThanConnection
                   )
-                )
-                filteredFs
+                  buffer.clear()
+                  val (filteredFs, removedFsMsgs) =
+                    filterFSMessages(allMessages)
+                  onFsMsgCallbacks.foreach(
+                    _.lift(
+                      fSData.fsMessages,
+                      s"NOW CONNECTED : hasConnected=$hasConnected ; isConnect=true ; ${removedFsMsgs.length + connection.length}/${allMessages.fsMessages.length} messages dropped",
+                      removedFsMsgs ++ connection
+                    )
+                  )
+                  filteredFs
+                } else {
+                  buffer.append(
+                    fSData.copy(fsMessages = allMsgsOtherThanConnection)
+                  )
+                  onFsMsgCallbacks.foreach(
+                    _.lift(
+                      fSData.fsMessages,
+                      s"ATTEMPT CONNECTION : hasConnected=$hasConnected ; isConnect=true; ${connection.length}/${fSData.fsMessages.length} messages dropped",
+                      connection
+                    )
+                  )
+                  fSData.copy(fsMessages = Nil)
+                }
               } else {
-                buffer.append(newFsData)
+                buffer.append(fSData)
                 onFsMsgCallbacks.foreach(
                   _.lift(
                     fSData.fsMessages,
-                    s"ATTEMPT CONNECTION : hasConnected=$hasConnected ; isConnect=$isConnect; ${droppedMsgs.length}/${fSData.fsMessages.length} messages dropped",
-                    droppedMsgs
+                    s"ALL MSG BUFFERED : hasConnected=$hasConnected ; isConnect=false",
+                    Nil
                   )
                 )
                 fSData.copy(fsMessages = Nil)
               }
-            } else if (
-              needToLinger && !isLingering && !isConnect && cmdReplies
-                .exists {
-                  case a: CommandReply =>
-                    a.replyText.getOrElse("") == "+OK will linger"
-                }
-            ) {
-              val (newFsData, lingered, droppedMsgs) =
-                doLinger(fSData, isLingering)
-              isLingering = lingered
 
-              val (filteredFs, removedFsMsgs) = filterFSMessages(newFsData)
-              val allDroppedMessages = droppedMsgs ::: removedFsMsgs
-              onFsMsgCallbacks.foreach(
-                _.lift(
-                  fSData.fsMessages,
-                  s"LINGERED : hasConnected=$hasConnected ; isConnect=$isConnect; ${allDroppedMessages.length}/${fSData.fsMessages.length} messages dropped",
-                  allDroppedMessages
-                )
-              )
-              filteredFs
             } else {
-              val (filteredFs, removedFsMsgs) = filterFSMessages(fSData)
-              onFsMsgCallbacks.foreach(
-                _.lift(
-                  fSData.fsMessages,
-                  s"NORMAL PROCESSING : hasConnected=$hasConnected ; isConnect=$isConnect; ${removedFsMsgs.length}/${fSData.fsMessages.length} messages dropped",
-                  removedFsMsgs
+
+              if (needToLinger && !isLingering) {
+                val (lingerReply, allOtherMsgsOtherThanLingered) =
+                  fSData.fsMessages.partition({
+                    case cmd: CommandReply =>
+                      cmd.replyText.fold(false)(_ == "+OK will linger")
+                  })
+
+                isLingering =
+                  processLingered(lingerReply.head.asInstanceOf[CommandReply])
+                val (filteredFs, removedFsMsgs) = filterFSMessages(
+                  fSData.copy(fsMessages = allOtherMsgsOtherThanLingered)
                 )
-              )
-              filteredFs
+                val allDroppedMessages = lingerReply ::: removedFsMsgs
+                onFsMsgCallbacks.foreach(
+                  _.lift(
+                    fSData.fsMessages,
+                    s"LINGERED : hasConnected=$hasConnected ; isConnect=false; ${allDroppedMessages.length}/${fSData.fsMessages.length} messages dropped",
+                    allDroppedMessages
+                  )
+                )
+                filteredFs
+              } else {
+                val (filteredFs, removedFsMsgs) = filterFSMessages(fSData)
+                onFsMsgCallbacks.foreach(
+                  _.lift(
+                    fSData.fsMessages,
+                    s"NORMAL PROCESSING : hasConnected=$hasConnected ; isConnect=false; ${removedFsMsgs.length}/${fSData.fsMessages.length} messages dropped",
+                    removedFsMsgs
+                  )
+                )
+                filteredFs
+              }
             }
           }
           List(
@@ -778,16 +846,19 @@ abstract class FSConnection extends StrictLogging {
       command: FSCommand
   ): Future[QueueOfferResult] = {
 
-    val offerF = queue
-      .offer(command)
+    val cmdPromise = Promise[QueueOfferResult]
 
     onCommandCallbacks
       .foreach(
         _.lift(
-          FireAndForgetFSCommand(command, offerF)
+          FireAndForgetFSCommand(command, cmdPromise.future)
         )
       )
 
+    val offerF = queue
+      .offer(command)
+
+    cmdPromise.completeWith(offerF)
     offerF
 
   }
@@ -799,6 +870,13 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   private def publishCommand(command: FSCommand): Future[CommandResponse] = {
+
+    val cmdPromise = Promise[CommandResponse]
+
+    onCommandCallbacks.foreach(
+      _.lift(AwaitingFSCommand(command, cmdPromise.future))
+    )
+
     val offerF = queue
       .offer(command)
       .flatMap({
@@ -811,14 +889,14 @@ abstract class FSConnection extends StrictLogging {
           adapter.info(
             logMarker,
             s"""publishCommand for app id $appId Enqueued and Added to lookup
-                 |>> COMMAND
-                 |$command
-                 |>> MAP is now
-                 |${eventMap
+               |>> COMMAND
+               |$command
+               |>> MAP is now
+               |${eventMap
               .map({ item =>
                 s"""appId: ${item._1}
-                       |command
-                       |${item._2.command}""".stripMargin
+                     |command
+                     |${item._2.command}""".stripMargin
               })
               .mkString("\n")}""".stripMargin
           )
@@ -827,18 +905,18 @@ abstract class FSConnection extends StrictLogging {
         case QueueOfferResult.Failure(cause) => {
           Future.failed(
             new Exception(s"""Command ${command.eventUuid} failed on offer
-               |$command""".stripMargin, cause)
+                 |$command""".stripMargin, cause)
           )
         }
         case offer => {
           Future.failed(
             new Exception(s"""Command ${command.eventUuid} $offer on offer
-               |$command""".stripMargin)
+                 |$command""".stripMargin)
           )
         }
       })
 
-    onCommandCallbacks.foreach(_.lift(AwaitingFSCommand(command, offerF)))
+    cmdPromise.completeWith(offerF)
 
     offerF
 
@@ -1055,7 +1133,7 @@ abstract class FSConnection extends StrictLogging {
     publishCommand(Bridge(targets, dialType, config))
 
   /**
-    * Allows one channel to bridge itself to the a or b leg of another call. The remaining leg of the original call gets hungup
+    * Allows one channel to bridge itself to the a or b leg of another call. The allMsgsOtherthanAuthRequest leg of the original call gets hungup
     * Usage: intercept [-bleg] <uuid>
     *
     * @param uuid   : String
@@ -1116,7 +1194,12 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandReply
     */
   def subscribeEvents(events: EventName*): Future[CommandResponse] =
-    publishCommand(SubscribeEvents(events.toList))
+    subscribeEvents(events.toList)
+
+
+  def subscribeEvents(events: List[EventName]): Future[CommandResponse] =
+    publishCommand(SubscribeEvents(events))
+
 
   /**
     * Pause the channel for a given number of milliseconds, consuming the audio for that period of time.
