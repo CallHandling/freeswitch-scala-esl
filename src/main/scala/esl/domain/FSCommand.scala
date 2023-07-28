@@ -325,7 +325,7 @@ object CallCommands {
         retries.map(_.asOriginateArgs).getOrElse(Nil)
 
       s"""dial_$eventUuid=$${
-         |bgapi originate {${vars.asVarsString}}$target &park()
+         |bgapi originate ${vars.asVarsString}$target &park()
          |Job-UUID: $eventUuid
          |}""".stripMargin
     }
@@ -407,7 +407,7 @@ object CallCommands {
 
   final case class CreateUUID(config: ApplicationCommandConfig)
     extends FSCommand {
-    override def toString: String =s"bgapi create_uuid${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
+    override def toString: String =s"bgapi create_uuid $eventUuid${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }
 
   /**
