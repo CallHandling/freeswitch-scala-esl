@@ -32,6 +32,7 @@ import esl.parser.{DefaultParser, Parser}
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import scala.concurrent.{
+  Await,
   ExecutionContextExecutor,
   Future,
   Promise,
@@ -70,10 +71,23 @@ abstract class FSConnection extends StrictLogging {
       : Seq[PartialFunction[FSCommandPublication, Unit]] =
     Seq.empty
 
+  private var onFsMsgCallbacks
+      : Seq[PartialFunction[(List[FSMessage], String, List[FSMessage]), Unit]] =
+    Seq.empty
+
   def onSendCommand(
       partialFunction: PartialFunction[FSCommandPublication, Unit]
   ): Unit = {
     onCommandCallbacks = onCommandCallbacks :+ partialFunction
+  }
+
+  def onReceiveMsg(
+      partialFunction: PartialFunction[
+        (List[FSMessage], String, List[FSMessage]),
+        Unit
+      ]
+  ): Unit = {
+    onFsMsgCallbacks = onFsMsgCallbacks :+ partialFunction
   }
 
   def logMarker =
@@ -110,6 +124,15 @@ abstract class FSConnection extends StrictLogging {
       Supervision.Stop
     }
   }
+
+  /**
+    * Send auth command to freeswitch
+    *
+    * @param password : String
+    * @return Future[CommandResponse]
+    */
+  private[esl] def connect(password: String): Future[QueueOfferResult] =
+    publishNonMappingCommand(AuthCommand(password))
 
   protected[this] lazy val (queue, source) = {
     val sourceStage1 = Source
@@ -162,13 +185,22 @@ abstract class FSConnection extends StrictLogging {
         var unParsedBuffer: String = ""
         data => {
           try {
-            val fsPacket = data.utf8String
-            val (messages, buffer) = parser.parse(unParsedBuffer + fsPacket)
+            val (messages, buffer) =
+              parser.parse(unParsedBuffer + data.utf8String)
             unParsedBuffer = buffer
+            /*onFsMsgCallbacks.foreach(
+              _.lift(
+                (messages, "ALL MSGS FROM FS : WILL FIND DUPLICATE BELOW", Nil)
+              )
+            )*/
             List(FSData(self, messages))
           } catch {
             case e: Exception => {
               adapter.error(logMarker, e.getMessage, e)
+              onFsMsgCallbacks.foreach(_.lift((Nil, s"""ERROR PARSING fs events
+                  |---------------------
+                  |${unParsedBuffer + data.utf8String}
+                  |---------------------""".stripMargin, Nil)))
               List(FSData(self, List(NoneMessage())))
             }
           }
@@ -238,7 +270,8 @@ abstract class FSConnection extends StrictLogging {
       fsConnection: FS,
       fun: (String, Future[FSSocket[FS]]) => Sink[FSData, Mat],
       timeout: FiniteDuration,
-      needToLinger: Boolean
+      needToLinger: Boolean,
+      isInbound: Boolean = false
   ) = {
     lazy val timeoutFuture =
       after(duration = timeout, using = system.scheduler) {
@@ -267,23 +300,31 @@ abstract class FSConnection extends StrictLogging {
           case success => success
         })
     )
+
     lazy val connectToFS = (fsData: FSData, hasConnected: Boolean) => {
       fsData.fsMessages match {
-        case ::(command: CommandReply, _)
-            if (command.headers.contains(HeaderNames.uniqueId)) =>
+        case ::(command: CommandReply, remaining)
+            if command.headers.contains(
+              HeaderNames.uniqueId
+            ) || (isInbound && command.replyText.fold(false)(
+              _ == "+OK accepted"
+            )) =>
           if (command.success) {
-            val fsSocket = FSSocket(fsConnection, ChannelData(command.headers))
-            fsSocket.fsConnection.setConnectionId(
-              fsSocket.channelData.headers(HeaderNames.uniqueId)
-            )
-            fsConnectionPromise.complete(
-              Success(fsSocket)
-            )
+            if (!isInbound) {
+              val fsSocket =
+                FSSocket(fsConnection, ChannelData(command.headers))
+              fsSocket.fsConnection.setConnectionId(
+                fsSocket.channelData.headers(HeaderNames.uniqueId)
+              )
+              fsConnectionPromise.complete(
+                Success(fsSocket)
+              )
+            }
             if (needToLinger) publishNonMappingCommand(LingerCommand)
             (
-              fsData
-                .copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),
-              true
+              fsData.copy(fsMessages = remaining),
+              true,
+              command :: Nil
             )
           } else {
             adapter.error(
@@ -297,15 +338,15 @@ abstract class FSConnection extends StrictLogging {
                 )
               )
             )
-            (fsData, hasConnected)
+            (fsData, hasConnected, Nil)
           }
-        case _ => (fsData, hasConnected)
+        case _ => (fsData, hasConnected, Nil)
       }
     }
 
     lazy val doLinger = (fsData: FSData, isLingering: Boolean) => {
       fsData.fsMessages match {
-        case ::(command: CommandReply, _) =>
+        case ::(command: CommandReply, remaining) =>
           adapter.info(
             logMarker,
             s"CALL ${callId} Reply of linger command, ${isLingering}, ${command}, promise status: ${fsConnectionPromise.isCompleted}"
@@ -313,18 +354,53 @@ abstract class FSConnection extends StrictLogging {
           if (command.success) {
             (
               fsData
-                .copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),
-              true
+                .copy(fsMessages = remaining),
+              true,
+              command :: Nil
             )
           } else {
-            (fsData, isLingering)
+            (fsData, isLingering, Nil)
           }
-        case _ => (fsData, isLingering)
+        case _ => (fsData, isLingering, Nil)
       }
     }
 
-    val getCmdReplies = (fSData: FSData) => {
-      fSData.fsMessages.filter(a => a.contentType == ContentTypes.commandReply)
+    def processLingered(command: CommandReply) = {
+      adapter.info(
+        logMarker,
+        s"CALL ${callId} Reply of linger command, ${command}, promise status: ${fsConnectionPromise.isCompleted}"
+      )
+      command.success
+    }
+
+    def performConnection(
+        command: CommandReply,
+        isConnectingForFirstTime: Boolean
+    ) = {
+      if (isConnectingForFirstTime) {
+        if (command.success) {
+          if (!isInbound) {
+            fsConnection.setConnectionId(command.headers(HeaderNames.uniqueId))
+            fsConnectionPromise.complete(
+              Success(FSSocket(fsConnection, ChannelData(command.headers)))
+            )
+          }
+          if (needToLinger) publishNonMappingCommand(LingerCommand)
+        } else {
+          adapter.error(
+            logMarker,
+            s"CALL ${callId}Socket failed to make connection with an error: ${command.errorMessage}"
+          )
+          fsConnectionPromise.complete(
+            Failure(
+              new Exception(
+                s"CALL ${callId}Socket failed to make connection with an error: ${command.errorMessage}"
+              )
+            )
+          )
+        }
+      }
+      command.success
     }
 
     def freeSwitchMsgToString(msg: FSMessage): String = {
@@ -345,12 +421,13 @@ abstract class FSConnection extends StrictLogging {
     Flow[FSData]
       .statefulMapConcat(() => {
         var hasConnected: Boolean = false
+        var wasOnceConnected: Boolean = false
         var isLingering: Boolean = false
         var isFiltering: Boolean = false
         val buffer: mutable.ListBuffer[FSData] =
           mutable.ListBuffer.empty[FSData]
 
-        def filterFSMessages(fSData: FSData): FSData = {
+        def filterFSMessages(fSData: FSData): (FSData, List[FSMessage]) = {
           val (messagesWithSameId, messagesWithDifferentId) = {
             fSData.fsMessages.partition { message =>
               message.headers
@@ -377,44 +454,142 @@ abstract class FSConnection extends StrictLogging {
                 .mkString("\n----")}""".stripMargin
             )
           }
-          fSData.copy(fsMessages = messagesWithSameId)
+          fSData
+            .copy(fsMessages = messagesWithSameId) -> messagesWithDifferentId
         }
 
         fSData => {
-          lazy val cmdReplies = getCmdReplies(fSData)
-          lazy val isConnect = cmdReplies.foldLeft(false)((_, b) =>
-            b.headers.contains(HeaderNames.uniqueId)
-          )
 
           val updatedFSData = {
-            if (!hasConnected && !isConnect) {
-              buffer.append(fSData)
-              fSData.copy(fsMessages = Nil)
-            } else if (!hasConnected && isConnect) {
-              val con = connectToFS(fSData, hasConnected)
-              hasConnected = con._2
-              if (hasConnected) {
-                val allMessages = fSData.copy(fsMessages =
-                  buffer.flatMap(_.fsMessages).toList ++ fSData.fsMessages
+
+            lazy val (authRequest, allMsgsOtherThanAuthRequest) =
+              fSData.fsMessages
+                .partition(
+                  _.contentType == esl.domain.ContentTypes.authRequest
                 )
-                buffer.clear()
-                filterFSMessages(allMessages)
+
+            if (authRequest.nonEmpty) {
+              buffer.append(
+                fSData.copy(fsMessages = allMsgsOtherThanAuthRequest)
+              )
+              onFsMsgCallbacks.foreach(
+                _.lift(
+                  fSData.fsMessages,
+                  s"AUTH REQUEST MSG BUFFERED : wasOnceConnected=$hasConnected ; will mark as not connected now ; hasConnected=false",
+                  authRequest
+                )
+              )
+              fsConnectionPromise.complete(
+                Success(
+                  FSSocket(
+                    fsConnection,
+                    ChannelData(Map(HeaderNames.uniqueId -> callId))
+                  )
+                )
+              )
+              fsConnection.connect("ClueCon")
+              hasConnected = false
+              fSData.copy(fsMessages = Nil)
+            } else if (!hasConnected) {
+
+              lazy val (connection, allMsgsOtherThanConnection) = {
+                if (isInbound || wasOnceConnected) {
+                  fSData.fsMessages.partition({
+                    case cmd: CommandReply =>
+                      cmd.replyText.fold(false)(_ == "+OK accepted")
+                  })
+                } else {
+                  fSData.fsMessages.partition({
+                    case cmd: CommandReply =>
+                      cmd.headers
+                        .contains(HeaderNames.uniqueId) && cmd.eventName
+                        .fold(false)(_ == "CHANNEL_DATA")
+                  })
+                }
+              }
+
+              if (connection.nonEmpty) {
+                hasConnected = performConnection(
+                  connection.head.asInstanceOf[CommandReply],
+                  !wasOnceConnected
+                )
+                wasOnceConnected = true
+                if (hasConnected) {
+                  val allMessages = fSData.copy(fsMessages =
+                    buffer
+                      .flatMap(_.fsMessages)
+                      .toList ++ allMsgsOtherThanConnection
+                  )
+                  buffer.clear()
+                  val (filteredFs, removedFsMsgs) =
+                    filterFSMessages(allMessages)
+                  onFsMsgCallbacks.foreach(
+                    _.lift(
+                      fSData.fsMessages,
+                      s"NOW CONNECTED : hasConnected=$hasConnected ; isConnect=true ; ${removedFsMsgs.length + connection.length}/${allMessages.fsMessages.length} messages dropped",
+                      removedFsMsgs ++ connection
+                    )
+                  )
+                  filteredFs
+                } else {
+                  buffer.append(
+                    fSData.copy(fsMessages = allMsgsOtherThanConnection)
+                  )
+                  onFsMsgCallbacks.foreach(
+                    _.lift(
+                      fSData.fsMessages,
+                      s"ATTEMPT CONNECTION : hasConnected=$hasConnected ; isConnect=true; ${connection.length}/${fSData.fsMessages.length} messages dropped",
+                      connection
+                    )
+                  )
+                  fSData.copy(fsMessages = Nil)
+                }
               } else {
-                buffer.append(con._1)
+                buffer.append(fSData)
+                onFsMsgCallbacks.foreach(
+                  _.lift(
+                    fSData.fsMessages,
+                    s"ALL MSG BUFFERED : hasConnected=$hasConnected ; isConnect=false",
+                    Nil
+                  )
+                )
                 fSData.copy(fsMessages = Nil)
               }
-            } else if (
-              needToLinger && !isLingering && !isConnect && cmdReplies
-                .exists {
-                  case a: CommandReply =>
-                    a.replyText.getOrElse("") == "+OK will linger"
-                }
-            ) {
-              val ling = doLinger(fSData, isLingering)
-              isLingering = ling._2
-              filterFSMessages(ling._1)
+
             } else {
-              filterFSMessages(fSData)
+
+              if (needToLinger && !isLingering) {
+                val (lingerReply, allOtherMsgsOtherThanLingered) =
+                  fSData.fsMessages.partition({
+                    case cmd: CommandReply =>
+                      cmd.replyText.fold(false)(_ == "+OK will linger")
+                  })
+
+                isLingering =
+                  processLingered(lingerReply.head.asInstanceOf[CommandReply])
+                val (filteredFs, removedFsMsgs) = filterFSMessages(
+                  fSData.copy(fsMessages = allOtherMsgsOtherThanLingered)
+                )
+                val allDroppedMessages = lingerReply ::: removedFsMsgs
+                onFsMsgCallbacks.foreach(
+                  _.lift(
+                    fSData.fsMessages,
+                    s"LINGERED : hasConnected=$hasConnected ; isConnect=false; ${allDroppedMessages.length}/${fSData.fsMessages.length} messages dropped",
+                    allDroppedMessages
+                  )
+                )
+                filteredFs
+              } else {
+                val (filteredFs, removedFsMsgs) = filterFSMessages(fSData)
+                onFsMsgCallbacks.foreach(
+                  _.lift(
+                    fSData.fsMessages,
+                    s"NORMAL PROCESSING : hasConnected=$hasConnected ; isConnect=false; ${removedFsMsgs.length}/${fSData.fsMessages.length} messages dropped",
+                    removedFsMsgs
+                  )
+                )
+                filteredFs
+              }
             }
           }
           List(
@@ -481,85 +656,182 @@ abstract class FSConnection extends StrictLogging {
     * @return EventMessage
     */
   private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
-
-    eventMessage.applicationUuid match {
-      case Some(appId) => {
-        eventMap.get(appId) match {
-          case Some(commandToQueue) => {
-            if (eventMessage.eventName.contains(EventNames.ChannelExecute))
-              commandToQueue.executeEvent.complete(Success(eventMessage))
-            else if (
-              eventMessage.eventName.contains(EventNames.ChannelExecuteComplete)
-            ) {
-              commandToQueue.executeComplete.complete(Success(eventMessage))
-              eventMap.remove(commandToQueue.command.eventUuid)
-              adapter.info(
-                logMarker,
-                s"""handleFSEventMessage for app id $appId Removing entry
-                   |>> TYPE
-                   |EVENT ${eventMessage.eventName.getOrElse("NA")}
-                   |>> HEADERS
-                   |${eventMessage.headers
-                  .map(h => h._1 + " : " + h._2)
-                  .mkString(space, "\n" + space, "")}
-                   |>> BODY
-                   |${eventMessage.body}
-                   |>> MAP is below
-                   |${eventMap
-                  .map({ item =>
-                    s"""appId: ${item._1}
-                         |command
-                         |${item._2.command}""".stripMargin
-                  })
-                  .mkString("\n")}""".stripMargin
-              )
-            } else {
-              adapter.warning(
-                logMarker,
-                s"""handleFSEventMessage for app id $appId Unable to handle Command (unexpected eventName header)
-                   |>> TYPE
-                   |EVENT ${eventMessage.eventName.getOrElse("NA")}
-                   |>> HEADERS
-                   |${eventMessage.headers
-                  .map(h => h._1 + " : " + h._2)
-                  .mkString(space, "\n" + space, "")}
-                   |>> BODY
-                   |${eventMessage.body}""".stripMargin
-              )
-            }
+    (
+      eventMessage.applicationUuid,
+      eventMessage.applicationUuid.flatMap(eventMap.get),
+      eventMessage.uuid,
+      eventMessage.eventName
+    ) match {
+      case (_, Some(commandToQueue), _, Some(EventNames.ChannelExecute)) if !eventMessage.answerState.contains(AnswerStates.Early) =>
+        commandToQueue.executeEvent.complete(Success(eventMessage))
+      case (Some(appId), Some(commandToQueue), _, Some(EventNames.ChannelExecuteComplete)) if !eventMessage.answerState.contains(AnswerStates.Early) =>
+        commandToQueue.executeComplete.complete(Success(eventMessage))
+        eventMap.remove(commandToQueue.command.eventUuid)
+        adapter.info(
+          logMarker,
+          s"""handleFSEventMessage for app id $appId Removing entry
+             |>> TYPE
+             |EVENT ${eventMessage.eventName.getOrElse("NA")}
+             |>> HEADERS
+             |${
+            eventMessage.headers
+              .map(h => h._1 + " : " + h._2)
+              .mkString(space, "\n" + space, "")
           }
-          case _ => {
-            adapter.warning(
-              logMarker,
-              s"""handleFSEventMessage for app id $appId Unable to find Command in look up
-                 |>> TYPE
-                 |EVENT ${eventMessage.eventName}
-                 |>> HEADERS
-                 |${eventMessage.headers
-                .map(h => h._1 + " : " + h._2)
-                .mkString(space, "\n" + space, "")}
-                 |>> BODY
-                 |${eventMessage.body}""".stripMargin
-            )
+             |>> BODY
+             |${eventMessage.body}
+             |>> MAP is below
+             |${
+            eventMap
+              .map({ item =>
+                s"""appId: ${item._1}
+                   |command
+                   |${item._2.command}""".stripMargin
+              })
+              .mkString("\n")
+          }""".stripMargin
+        )
+      case (Some(appId), _, _, _) =>
+        adapter.warning(
+          logMarker,
+          s"""handleFSEventMessage for app id $appId Unable to handle Command (unexpected eventName header)
+             |>> TYPE
+             |EVENT ${eventMessage.eventName.getOrElse("NA")}
+             |>> HEADERS
+             |${
+            eventMessage.headers
+              .map(h => h._1 + " : " + h._2)
+              .mkString(space, "\n" + space, "")
+          }
+             |>> BODY
+             |${eventMessage.body}""".stripMargin
+        )
+      case (_, _, _, Some(EventNames.Api)) =>
+        if (eventMessage.apiCommand.contains("create_uuid") && eventMessage.headers.contains("API-Command-Argument")) {
+
+          val queuedCommand = eventMap.get(eventMessage.headers("API-Command-Argument"))
+          queuedCommand.map {
+            case CommandToQueue(_: CreateUUID, executeEvent, _) =>
+              executeEvent.complete(Success(eventMessage))
           }
         }
-      }
-      case _ => {
+      case (_, _, _, Some(EventNames.BackgroundJob)) if eventMap.contains(eventMessage.jobUuid.getOrElse("")) =>
+        val jobId = eventMap.get(eventMessage.jobUuid.getOrElse(""))
+        jobId match {
+          case Some(job) =>
+            job.executeComplete.complete(Success(eventMessage))
+            if (job.executeEvent.isCompleted)
+              eventMap.remove(job.command.eventUuid)
+            adapter.info(
+              logMarker,
+              s"""handleFSEventMessage for background job id $jobId Removing entry
+                 |>> TYPE
+                 |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                 |>> HEADERS
+                 |${
+                eventMessage.headers
+                  .map(h => h._1 + " : " + h._2)
+                  .mkString(space, "\n" + space, "")
+              }
+                 |>> BODY
+                 |${eventMessage.body}
+                 |>> MAP is below
+                 |${
+                eventMap
+                  .map({ item =>
+                    s"""appId: ${item._1}
+                       |command
+                       |${item._2.command}""".stripMargin
+                  })
+                  .mkString("\n")
+              }""".stripMargin
+            )
+          case _ =>
+            adapter.debug(logMarker, "Background job for unknown command")
+
+        }
+      case (_, _, _, Some(EventNames.ChannelState)) =>
+        adapter.info(
+          logMarker,
+          s"""Channel state event for callId
+             |${eventMessage.headers("Caller-Unique-ID")}
+             |>> MAP command is below
+             |${
+            eventMap
+              .map({ item =>
+                s"""appId: ${item._1}
+                   |command
+                   |${item._2.command}
+                   |command type ${item._2.command.getClass}""".stripMargin
+              })
+              .mkString("\n")
+          }""".stripMargin
+        )
+        val findResult =
+          eventMap.find { //TODO change eventMap key for this command
+            case (_, command) =>
+              command.command.isInstanceOf[Dial] &&
+                eventMessage.callerUniqueId.contains(
+                  command.command.asInstanceOf[Dial].uniqueId
+                )
+          }
+        adapter.info(s"Command from map $findResult")
+        findResult match {
+          case Some((key, command)) =>
+            if (!command.executeEvent.isCompleted)
+              command.executeEvent.complete(Success(eventMessage))
+            if (command.executeComplete.isCompleted) eventMap.remove(key)
+          case _ =>
+        }
+      case (_, _, _, Some(EventNames.ChannelCallState)) if !eventMessage.answerState.contains(AnswerStates.Ringing) =>
+        adapter.info(
+          logMarker,
+          s"""Channel call state event for callId
+             |${eventMessage.headers("Caller-Unique-ID")}
+             |>> MAP command is below
+             |${
+            eventMap
+              .map({ item =>
+                s"""appId: ${item._1}
+                   |command
+                   |${item._2.command}
+                   |command type ${item._2.command.getClass}""".stripMargin
+              })
+              .mkString("\n")
+          }""".stripMargin
+        )
+        val findResult =
+          eventMap.find { //TODO change eventMap key for this command
+            case (_, command) =>
+              command.command.isInstanceOf[Dial] &&
+                eventMessage.callerUniqueId.contains(
+                  command.command.asInstanceOf[Dial].uniqueId
+                )
+          }
+        adapter.info(s"Command from map $findResult")
+        findResult match {
+          case Some((key, command)) =>
+            if (!command.executeComplete.isCompleted)
+              command.executeComplete.complete(Success(eventMessage))
+            if (command.executeEvent.isCompleted) eventMap.remove(key)
+          case _ =>
+        }
+      case _ =>
         adapter.debug(
           logMarker,
           s"""handleFSEventMessage Unable to find application id header for event message
              |>> TYPE
              |EVENT ${eventMessage.eventName}
              |>> HEADERS
-             |${eventMessage.headers
-            .map(h => h._1 + " : " + h._2)
-            .mkString(space, "\n" + space, "")}
+             |${
+            eventMessage.headers
+              .map(h => h._1 + " : " + h._2)
+              .mkString(space, "\n" + space, "")
+          }
              |>> BODY
              |${eventMessage.body}""".stripMargin
         )
-      }
     }
-
     eventMessage
   }
 
@@ -574,28 +846,21 @@ abstract class FSConnection extends StrictLogging {
       command: FSCommand
   ): Future[QueueOfferResult] = {
 
+    val cmdPromise = Promise[QueueOfferResult]
+
+    onCommandCallbacks
+      .foreach(
+        _.lift(
+          FireAndForgetFSCommand(command, cmdPromise.future)
+        )
+      )
+
     val offerF = queue
       .offer(command)
 
-    if (onCommandCallbacks.nonEmpty) {
-      offerF
-        .map({ offer =>
-          onCommandCallbacks
-            .foreach(
-              _.lift(FireAndForgetFSCommand(command, Success(offer)))
-            )
-          offer
-        })
-        .recoverWith({
-          case e => {
-            onCommandCallbacks
-              .foreach(_.lift(FireAndForgetFSCommand(command, Failure(e))))
-            Future.failed(e)
-          }
-        })
-    } else {
-      offerF
-    }
+    cmdPromise.completeWith(offerF)
+    offerF
+
   }
 
   /**
@@ -605,58 +870,55 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   private def publishCommand(command: FSCommand): Future[CommandResponse] = {
+
+    val cmdPromise = Promise[CommandResponse]
+
+    onCommandCallbacks.foreach(
+      _.lift(AwaitingFSCommand(command, cmdPromise.future))
+    )
+
     val offerF = queue
       .offer(command)
-      .map({ offer =>
-        val (commandReply, commandToQueue, cmdResponse) =
-          buildCommandAndResponse(command)
-        commandQueue.enqueue(commandReply)
-        val appId = command.eventUuid
-        eventMap.put(appId, commandToQueue)
-        adapter.info(
-          logMarker,
-          s"""publishCommand for app id $appId Added to lookup
-             |>> COMMAND
-             |$command
-             |>> MAP is now
-             |${eventMap
-            .map({ item =>
-              s"""appId: ${item._1}
-               |command
-               |${item._2.command}""".stripMargin
-            })
-            .mkString("\n")}""".stripMargin
-        )
-        onCommandCallbacks
-          .foreach(
-            _.lift(
-              AwaitingFSCommand(
-                command,
-                Success(
-                  offer -> AwaitFSCommandResponse(
-                    cmdResponse.commandReply,
-                    cmdResponse.executeEvent,
-                    cmdResponse.executeComplete
-                  )
-                )
-              )
-            )
+      .flatMap({
+        case QueueOfferResult.Enqueued => {
+          val (commandReply, commandToQueue, cmdResponse) =
+            buildCommandAndResponse(command)
+          commandQueue.enqueue(commandReply)
+          val appId = command.eventUuid
+          eventMap.put(appId, commandToQueue)
+          adapter.info(
+            logMarker,
+            s"""publishCommand for app id $appId Enqueued and Added to lookup
+               |>> COMMAND
+               |$command
+               |>> MAP is now
+               |${eventMap
+              .map({ item =>
+                s"""appId: ${item._1}
+                     |command
+                     |${item._2.command}""".stripMargin
+              })
+              .mkString("\n")}""".stripMargin
           )
-        cmdResponse
+          Future.successful(cmdResponse)
+        }
+        case QueueOfferResult.Failure(cause) => {
+          Future.failed(
+            new Exception(s"""Command ${command.eventUuid} failed on offer
+                 |$command""".stripMargin, cause)
+          )
+        }
+        case offer => {
+          Future.failed(
+            new Exception(s"""Command ${command.eventUuid} $offer on offer
+                 |$command""".stripMargin)
+          )
+        }
       })
 
-    if (onCommandCallbacks.nonEmpty) {
-      offerF
-        .recoverWith({
-          case e => {
-            onCommandCallbacks
-              .foreach(_.lift(AwaitingFSCommand(command, Failure(e))))
-            Future.failed(e)
-          }
-        })
-    } else {
-      offerF
-    }
+    cmdPromise.completeWith(offerF)
+
+    offerF
 
   }
 
@@ -709,9 +971,10 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def break(
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
+      config: ApplicationCommandConfig = ApplicationCommandConfig(),
+      app: Option[String] = Option.empty
   ): Future[CommandResponse] =
-    publishCommand(Break(config))
+    publishCommand(Break(config, app))
 
   /**
     * Answer the call for a channel.This sets up duplex audio between the calling ''A'' leg and the FreeSwitch server.
@@ -780,6 +1043,18 @@ abstract class FSConnection extends StrictLogging {
   ): Future[CommandResponse] = {
     setOriginatedCallIds(uuid)
     publishCommand(FilterUUId(uuid, config))
+  }
+  def createUUID(
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] = {
+    publishCommand(CreateUUID(config))
+  }
+
+  def filterX(
+      filter: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] = {
+    publishCommand(FilterX(filter, config))
   }
 
   /**
@@ -858,7 +1133,7 @@ abstract class FSConnection extends StrictLogging {
     publishCommand(Bridge(targets, dialType, config))
 
   /**
-    * Allows one channel to bridge itself to the a or b leg of another call. The remaining leg of the original call gets hungup
+    * Allows one channel to bridge itself to the a or b leg of another call. The allMsgsOtherthanAuthRequest leg of the original call gets hungup
     * Usage: intercept [-bleg] <uuid>
     *
     * @param uuid   : String
@@ -919,7 +1194,12 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandReply
     */
   def subscribeEvents(events: EventName*): Future[CommandResponse] =
-    publishCommand(SubscribeEvents(events.toList))
+    subscribeEvents(events.toList)
+
+
+  def subscribeEvents(events: List[EventName]): Future[CommandResponse] =
+    publishCommand(SubscribeEvents(events))
+
 
   /**
     * Pause the channel for a given number of milliseconds, consuming the audio for that period of time.
@@ -1091,12 +1371,12 @@ object FSConnection {
 
   case class FireAndForgetFSCommand(
       command: FSCommand,
-      queueOfferResult: Try[QueueOfferResult]
+      queueOfferResult: Future[QueueOfferResult]
   ) extends FSCommandPublication
 
   case class AwaitingFSCommand(
       command: FSCommand,
-      result: Try[(QueueOfferResult, AwaitFSCommandResponse)]
+      result: Future[CommandResponse]
   ) extends FSCommandPublication
 
   case class AwaitFSCommandResponse(

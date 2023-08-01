@@ -46,7 +46,7 @@ object EventNames {
   }
 
   case object ChannelCallState extends EventName {
-    override val name: String = "CHANNEL_CALL_STATE"
+    override val name: String = "CHANNEL_CALLSTATE"
   }
 
   case object ChannelAnswer extends EventName {

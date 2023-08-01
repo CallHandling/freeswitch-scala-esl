@@ -20,14 +20,16 @@ import akka.{Done, NotUsed}
 import akka.actor.ActorSystem
 import akka.event.MarkerLoggingAdapter
 import akka.stream.Materializer
-import akka.stream.scaladsl.{BidiFlow, Flow, Sink, Source, Tcp}
+import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source, Tcp}
 import akka.util.ByteString
 import com.typesafe.config.Config
-import esl.FSConnection.{FSData, FSSocket}
+import esl.FSConnection.{FSCommandPublication, FSData, FSSocket}
+import esl.domain.FSMessage
 
 import java.util.UUID
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
+import scala.util.{Failure, Success}
 
 object InboundServer {
   private val address = "freeswitch.inbound.address"
@@ -108,7 +110,7 @@ class InboundServer(
     * Open a client connection for given interface and port
     *
     * @param sink materialize upstream element
-    * @param flow flow from source to bi-directional
+    * @param flow flow from fsCommandSource to bi-directional
     * @tparam T1 element materialize from upstream
     * @tparam T2 element publish to downstream
     * @return
@@ -122,12 +124,13 @@ class InboundServer(
       )
   ) = {
     val clientFlow = Tcp().outgoingConnection(interface, port)
-    val (upStreamCompletion, source, protocol) = flow
+    val (upStreamCompletion, fsCommandSource, protocol) = flow
     val flowWithProtocol: Flow[T2, T1, Future[Tcp.OutgoingConnection]] =
       clientFlow
-        .join(protocol)
-    val (m1, m2) = flowWithProtocol.runWith(source, sink)
+        .joinMat(protocol)(Keep.left)
+    val (m1, m2) = flowWithProtocol.runWith(fsCommandSource, sink)
     (upStreamCompletion, m1, m2)
+
   }
 
   /**
@@ -137,24 +140,84 @@ class InboundServer(
     * @param fun      function will get freeswitch outbound connection after injecting sink
     * @return Future[(UpSourceCompletionFuture, DownStreamCompletionFuture)]
     */
-  def connect[Mat](password: String)(
+  def connect[Mat](
+      password: String,
+      onSendCommand: Option[
+        (
+            String,
+            InboundFSConnection
+        ) => PartialFunction[FSCommandPublication, Unit]
+      ] = None,
+      onFsMsg: Option[
+        (String, InboundFSConnection) => PartialFunction[
+          (List[FSMessage], String, List[FSMessage]),
+          Unit
+        ]
+      ] = None
+  )(
       fun: (String, Future[FSSocket[InboundFSConnection]]) => Sink[FSData, Mat]
   ): Future[(Future[Done], Future[Mat])] = {
     val fsConnection = InboundFSConnection(enableDebugLogs)
-    fsConnection.connect(password).map { _ =>
-      val callId = UUID.randomUUID().toString
+    val callId = UUID.randomUUID().toString
+    onFsMsg.foreach(fn => fsConnection.onReceiveMsg(fn(callId, fsConnection)))
+    onSendCommand.foreach(fn =>
+      fsConnection.onSendCommand(fn(callId, fsConnection))
+    )
 
-      val sink = fsConnection.init(
-        callId,
-        Promise[FSSocket[InboundFSConnection]](),
-        fsConnection,
-        fun,
-        timeout,
-        linger
-      )
-      val (upCompF, _, downCompF) = client(sink, fsConnection.handler())
+
+
+    val sink = fsConnection.init(
+      callId,
+      Promise[FSSocket[InboundFSConnection]](),
+      fsConnection,
+      fun,
+      timeout,
+      false,
+      isInbound = true
+    )
+    val (upCompF, _, downCompF) = client(sink, fsConnection.handler())
+
+    upCompF.onComplete({
+      case Failure(exception) =>
+        adapter.error(
+          "callId {} upstream to freeswitch complete with error",
+          callId,
+          exception
+        )
+      case Success(_) =>
+        adapter
+          .info(
+            "callId {} upstream to freeswitch complete successfuly",
+            callId
+          )
+    })
+
+    downCompF.onComplete({
+      case Failure(exception) =>
+        adapter.error(
+          "callId {} downstream from freeswitch complete with error",
+          callId,
+          exception
+        )
+      case Success(_) =>
+        adapter
+          .info(
+            "callId {} upstream to freeswitch complete successfuly",
+            callId
+          )
+    })
+
+/*    fsConnection
+      .connect(password)
+      .map { offerResult =>
+        adapter.info("auth command offer {}", offerResult)
+      }*/
+
+    Future.successful((upCompF, downCompF))
+
+    /*Future.successful {
       (upCompF, downCompF)
-    }
+    }*/
   }
 
 }

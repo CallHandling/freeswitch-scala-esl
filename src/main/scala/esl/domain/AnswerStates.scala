@@ -42,6 +42,10 @@ object AnswerStates {
     override val name: String = "ringing"
   }
 
-  val states: Map[String, AnswerState] = List(NewChannel, Early, Answered, Hangup, Ringing)
+  case object Undefined extends AnswerState {
+    override val name: String = "undefined"
+  }
+
+  val states: Map[String, AnswerState] = List(NewChannel, Early, Answered, Hangup, Ringing, Undefined)
     .map(state => state.name -> state).toMap
 }

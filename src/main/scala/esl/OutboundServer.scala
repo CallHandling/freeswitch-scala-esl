@@ -33,7 +33,8 @@ import akka.util.ByteString
 import akka.{Done, NotUsed}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
-import esl.FSConnection.{FSData, FSSocket}
+import esl.FSConnection.{FSCommandPublication, FSData, FSSocket}
+import esl.domain.FSMessage
 
 import java.util.UUID
 import scala.language.postfixOps
@@ -166,9 +167,25 @@ class OutboundServer(
           Future[FSSocket[OutboundFSConnection]]
       ) => Sink[FSData, Mat],
       onFsConnectionStart: OutboundServer.OnConnectionCallBack[Mat] =
-        OutboundServer.OnConnectionCallBack.noop
+        OutboundServer.OnConnectionCallBack.noop,
+      onSendCommand: Option[
+        (
+            String,
+            OutboundFSConnection
+        ) => PartialFunction[FSCommandPublication, Unit]
+      ] = None,
+      onFsMsg: Option[(String, OutboundFSConnection) => PartialFunction[
+        (List[FSMessage], String, List[FSMessage]),
+        Unit
+      ]] = None
   ): Future[Tcp.ServerBinding] =
-    server(fun, fsConnection => fsConnection.handler(), onFsConnectionStart)
+    server(
+      fun,
+      fsConnection => fsConnection.handler(),
+      onFsConnectionStart,
+      onSendCommand,
+      onFsMsg
+    )
 
   /** This function will start a tcp server for given sink,source and flow.
     *
@@ -189,14 +206,28 @@ class OutboundServer(
           Source[T, NotUsed],
           BidiFlow[ByteString, FSData, T, ByteString, NotUsed]
       ),
-      onFsConnectionStart: OutboundServer.OnConnectionCallBack[Mat1]
+      onFsConnectionStart: OutboundServer.OnConnectionCallBack[Mat1],
+      onSendCommand: Option[
+        (
+            String,
+            OutboundFSConnection
+        ) => PartialFunction[FSCommandPublication, Unit]
+      ] = None,
+      onFsMsg: Option[(String, OutboundFSConnection) => PartialFunction[
+        (List[FSMessage], String, List[FSMessage]),
+        Unit
+      ]] = None
   ): Future[Tcp.ServerBinding] = {
 
     val sink = Sink.foreach[IncomingConnection] { connection =>
       val fsConnection = OutboundFSConnection(enableDebugLogs)
-      fsConnection.connect().map { _ =>
-        val callId = UUID.randomUUID().toString
+      val callId = UUID.randomUUID().toString.replace("-","")
+      onFsMsg.foreach(fn => fsConnection.onReceiveMsg(fn(callId, fsConnection)))
+      onSendCommand.foreach(fn =>
+        fsConnection.onSendCommand(fn(callId, fsConnection))
+      )
 
+      fsConnection.connect().map { _ =>
         lazy val sink = fsConnection.init(
           callId,
           Promise[FSSocket[OutboundFSConnection]](),

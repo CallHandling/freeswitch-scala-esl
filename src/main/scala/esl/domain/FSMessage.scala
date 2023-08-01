@@ -34,28 +34,42 @@ case class NoneMessage() extends FSMessage {
   override val contentType: String = "none"
 }
 
-case class BasicMessage(headers: Map[String, String], body: Option[String]) extends FSMessage {
-  lazy val contentType: String = headers.lift(HeaderNames.contentType).fold("")(identity)
-  lazy val contentLength: Int = headers.lift(HeaderNames.contentLength).fold(0)(_.toInt)
+case class BasicMessage(headers: Map[String, String], body: Option[String])
+    extends FSMessage {
+  lazy val contentType: String =
+    headers.lift(HeaderNames.contentType).fold("")(identity)
+  lazy val contentLength: Int =
+    headers.lift(HeaderNames.contentLength).fold(0)(_.toInt)
   //ToDo: Implement toString
 }
 
 case class CommandReply(basicMessage: BasicMessage) extends FSMessage {
 
-  require(basicMessage.contentType == ContentTypes.commandReply, s"Expected content type command/reply, got ${basicMessage.contentType} instead.")
+  require(
+    basicMessage.contentType == ContentTypes.commandReply,
+    s"Expected content type command/reply, got ${basicMessage.contentType} instead."
+  )
 
   override val headers: Map[String, String] = basicMessage.headers
   override val body: Option[String] = basicMessage.body
   override val contentLength: Int = basicMessage.contentLength
   override val contentType: String = basicMessage.contentType
 
-  val replyText = headers.lift(HeaderNames.replyText)
+  lazy val replyText = headers.lift(HeaderNames.replyText)
 
-  val success: Boolean = replyText.exists(f => f.charAt(0) == '+' || f == "%2BOK%0A")
+  //lazy val success: Boolean = replyText.exists(f => f.charAt(0) == '+' || f == "%2BOK%0A")
+  lazy val success: Boolean = replyText.fold(false)(rplyTxt =>
+    rplyTxt.startsWith("+OK") || rplyTxt.startsWith("%2BOK%0A")
+  )
 
-  val errorMessage: String = replyText.collect {
-    case text if text.startsWith("-ERR") => text.substring(5, text.length - 5)
-  }.getOrElse("")
+  lazy val errorMessage: String = replyText
+    .collect {
+      case text if text.startsWith("-ERR") => text.substring(5, text.length - 5)
+    }
+    .getOrElse("")
+
+  lazy val eventName: Option[String] =
+    headers.get(esl.domain.HeaderNames.eventName)
 
 }
 
@@ -63,7 +77,8 @@ case class ApiResponse(basicMessage: BasicMessage) extends FSMessage {
   val success: Boolean = basicMessage.body.isDefined
 
   val errorMessage: Option[String] = basicMessage.body.collect {
-    case bodyOp if bodyOp.startsWith("-ERR") => bodyOp.substring(5, bodyOp.length - 5)
+    case bodyOp if bodyOp.startsWith("-ERR") =>
+      bodyOp.substring(5, bodyOp.length - 5)
   }
 
   override val body: Option[String] = basicMessage.body
@@ -74,56 +89,98 @@ case class ApiResponse(basicMessage: BasicMessage) extends FSMessage {
 
 case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
 
-  private val isCommandReply: Boolean = basicMessage.contentType == ContentTypes.commandReply &&
-    basicMessage.headers.contains(HeaderNames.eventName)
+  private val isCommandReply: Boolean =
+    basicMessage.contentType == ContentTypes.commandReply &&
+      basicMessage.headers.contains(HeaderNames.eventName)
 
-  private val delimiterIndex: Int = basicMessage.body.fold(-1)(_.indexOf("\n\n"))
+  private val delimiterIndex: Int =
+    basicMessage.body.fold(-1)(_.indexOf("\n\n"))
 
   private val hasBody: Boolean = basicMessage.body match {
-    case Some(bdy) if basicMessage.headers.getOrElse(HeaderNames.contentLength, "-1").toInt > -1 =>
+    case Some(bdy)
+        if basicMessage.headers
+          .getOrElse(HeaderNames.contentLength, "-1")
+          .toInt > -1 =>
       !(delimiterIndex == -1 || delimiterIndex == bdy.length - 2)
     case _ => false
   }
 
   override val headers: Map[String, String] = {
     if (isCommandReply) basicMessage.headers
-    else basicMessage.body.fold(basicMessage.headers) { b =>
-      if (hasBody) basicMessage.headers ++ StringHelpers.parseKeyValuePairs(b substring(0, delimiterIndex), ':')
-      else basicMessage.headers ++ StringHelpers.parseKeyValuePairs(b, ':')
-    }
+    else
+      basicMessage.body.fold(basicMessage.headers) { b =>
+        if (hasBody)
+          basicMessage.headers ++ StringHelpers.parseKeyValuePairs(
+            b substring (0, delimiterIndex),
+            ':'
+          )
+        else basicMessage.headers ++ StringHelpers.parseKeyValuePairs(b, ':')
+      }
   }
 
-  override val contentLength: Int = headers.get(HeaderNames.contentLength).fold(-1)(_.toInt)
+  override val contentLength: Int =
+    headers.get(HeaderNames.contentLength).fold(-1)(_.toInt)
 
   override val body: Option[String] = {
     if (isCommandReply) basicMessage.body
-    else basicMessage.body.flatMap {
-      bdy => if (hasBody) Some(bdy.substring(delimiterIndex + 2, bdy.length)) else None
-    }
+    else
+      basicMessage.body.flatMap { bdy =>
+        if (hasBody) Some(bdy.substring(delimiterIndex + 2, bdy.length))
+        else None
+      }
   }
 
   override val contentType: String = basicMessage.contentType
 
   val uuid: Option[String] = headers.get(HeaderNames.uniqueId)
   val otherLegUUID: Option[String] = headers.get(HeaderNames.otherLegUniqueId)
-  val channelCallUUID: Option[String] = headers.get(HeaderNames.channelCallUniqueId)
+  val channelCallUUID: Option[String] =
+    headers.get(HeaderNames.channelCallUniqueId)
   val eventName: Option[EventNames.EventName] =
-    headers.get(HeaderNames.eventName).fold(Option.empty[EventNames.EventName])(EventNames.events.lift)
+    headers
+      .get(HeaderNames.eventName)
+      .fold(Option.empty[EventNames.EventName])(EventNames.events.lift)
 
   val channelState: Option[AnswerStates.AnswerState] =
-    headers.get(HeaderNames.channelState).fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
+    headers
+      .get(HeaderNames.channelState)
+      .fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
+
+  val channelCallState: Option[AnswerStates.AnswerState] =
+    headers
+      .get(HeaderNames.channelCallState)
+      .fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
 
   val answerState: Option[AnswerStates.AnswerState] =
-    headers.get(HeaderNames.answerState).fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
+    headers
+      .get(HeaderNames.answerState)
+      .fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
 
   val hangupCause: Option[HangupCauses.HangupCause] =
-    headers.get(HeaderNames.hangupCause).fold(Option.empty[HangupCauses.HangupCause])(HangupCauses.causes.lift)
+    headers
+      .get(HeaderNames.hangupCause)
+      .fold(Option.empty[HangupCauses.HangupCause])(HangupCauses.causes.lift)
 
-  val applicationUuid: Option[String] = headers.get(HeaderNames.applicationUuid)
+  val applicationUuid: Option[String] = headers.get(HeaderNames.applicationUuid).flatMap({
+    case x if x.trim.isEmpty  => None
+    case x => Some(x.trim)
+  })
+
+  val jobUuid: Option[String] = headers.get(HeaderNames.jobUUID)
+
+  val callerUniqueId: Option[String] = headers.get(HeaderNames.callerUniqueId)
+
+  val originalChannelCallState: Option[AnswerStates.AnswerState] =
+    headers
+      .get(HeaderNames.originalChannelCallState)
+      .fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
+
+  val apiCommand: Option[String] = headers.get(HeaderNames.apiCommand)
 
   def getHeader(header: String): Option[String] = headers.get(header)
 
-  def getVariable(variable: String): Option[String] = getHeader(s"variable_$variable")
+  def getVariable(variable: String): Option[String] =
+    getHeader(s"variable_$variable")
 
   //ToDO implement toString for debugging
 }
