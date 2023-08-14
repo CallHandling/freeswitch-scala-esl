@@ -13,7 +13,7 @@ class InboundFSConnectionSpec
   "connect function" should {
     "enqueue Auth command" in {
       val inbound = new InboundFSConnection(enableDebugLogs = true)
-      whenReady(inbound.connect("ClueCon")) { result =>
+      whenReady(inbound.authenticate("ClueCon")) { result =>
         result shouldBe QueueOfferResult.Enqueued
       }
     }

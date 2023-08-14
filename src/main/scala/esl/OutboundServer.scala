@@ -164,7 +164,8 @@ class OutboundServer(
   def startWith[Mat](
       fun: (
           String,
-          Future[FSSocket[OutboundFSConnection]]
+          Future[FSSocket[OutboundFSConnection]],
+          Future[OutboundFSConnection]
       ) => Sink[FSData, Mat],
       onFsConnectionStart: OutboundServer.OnConnectionCallBack[Mat] =
         OutboundServer.OnConnectionCallBack.noop,
@@ -199,7 +200,8 @@ class OutboundServer(
   private[this] def server[T, Mat1](
       fun: (
           String,
-          Future[FSSocket[OutboundFSConnection]]
+          Future[FSSocket[OutboundFSConnection]],
+          Future[OutboundFSConnection]
       ) => Sink[FSData, Mat1],
       flow: OutboundFSConnection => (
           Future[Done],
@@ -221,7 +223,7 @@ class OutboundServer(
 
     val sink = Sink.foreach[IncomingConnection] { connection =>
       val fsConnection = OutboundFSConnection(enableDebugLogs)
-      val callId = UUID.randomUUID().toString.replace("-","")
+      val callId = UUID.randomUUID().toString.replace("-", "")
       onFsMsg.foreach(fn => fsConnection.onReceiveMsg(fn(callId, fsConnection)))
       onSendCommand.foreach(fn =>
         fsConnection.onSendCommand(fn(callId, fsConnection))

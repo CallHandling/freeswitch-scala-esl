@@ -33,11 +33,9 @@ case class InboundFSConnection(enableDebugLogs: Boolean)(implicit
   override implicit val materializer: Materializer = actorMaterializer
   override implicit val system: ActorSystem = actorSystem
   override implicit val adapter: MarkerLoggingAdapter = adapterIn
-
-
-
   override def play(
       fileName: String,
       config: ApplicationCommandConfig
   ): Future[CommandResponse] = super.play(fileName, config)
+
 }

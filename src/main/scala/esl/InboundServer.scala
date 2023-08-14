@@ -24,7 +24,8 @@ import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source, Tcp}
 import akka.util.ByteString
 import com.typesafe.config.Config
 import esl.FSConnection.{FSCommandPublication, FSData, FSSocket}
-import esl.domain.FSMessage
+import esl.domain.CallCommands.Dial
+import esl.domain.{ApplicationCommandConfig, EventNames, FSCommand, FSMessage}
 
 import java.util.UUID
 import scala.concurrent.duration._
@@ -155,16 +156,21 @@ class InboundServer(
         ]
       ] = None
   )(
-      fun: (String, Future[FSSocket[InboundFSConnection]]) => Sink[FSData, Mat]
+      fun: (
+          String,
+          Future[FSSocket[InboundFSConnection]],
+          Future[InboundFSConnection]
+      ) => Sink[FSData, Mat]
   ): Future[(Future[Done], Future[Mat])] = {
     val fsConnection = InboundFSConnection(enableDebugLogs)
-    val callId = UUID.randomUUID().toString
+    val callId = UUID.randomUUID().toString.replace("-", "")
     onFsMsg.foreach(fn => fsConnection.onReceiveMsg(fn(callId, fsConnection)))
     onSendCommand.foreach(fn =>
       fsConnection.onSendCommand(fn(callId, fsConnection))
     )
 
-
+    //val dialP = Promise[FSConnection.CommandResponse]
+    fsConnection.setConnectionId(callId)
 
     val sink = fsConnection.init(
       callId,
@@ -207,7 +213,7 @@ class InboundServer(
           )
     })
 
-/*    fsConnection
+    /*    fsConnection
       .connect(password)
       .map { offerResult =>
         adapter.info("auth command offer {}", offerResult)
