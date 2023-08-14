@@ -284,26 +284,24 @@ abstract class FSConnection extends StrictLogging {
 
     val fsPromise = Promise[FS]
 
-    lazy val futureSink = Sink.futureSink(
-      Future
-        .firstCompletedOf(Seq(fsConnectionPromise.future, timeoutFuture))
-        .map(fsSocket => {
-          fun(callId, Future.successful(fsSocket), fsPromise.future)
-        })
-        .transform({
-          case failure @ Failure(ex) =>
-            adapter.error(
-              logMarker,
-              ex,
-              s"CALL ${callId} About to shutdown due to exception in Future sink"
-            )
-            kill
-            failure
-          case success => success
-        })
-    )
+    lazy val socketOrTimeout = Future
+      .firstCompletedOf(
+        Seq(fsConnectionPromise.future, fsPromise.future, timeoutFuture)
+      )
+      .onFailure({
+        case ex =>
+          adapter.error(
+            logMarker,
+            ex,
+            s"CALL ${callId} About to shutdown due to exception in Future sink"
+          )
+          kill
+      })
 
-/*    lazy val connectToFS = (fsData: FSData, hasConnected: Boolean) => {
+    lazy val sink = fun(callId, fsConnectionPromise.future, fsPromise.future)
+      .mapMaterializedValue(Future.successful)
+
+    /*    lazy val connectToFS = (fsData: FSData, hasConnected: Boolean) => {
       fsData.fsMessages match {
         case ::(command: CommandReply, remaining)
             if command.headers.contains(
@@ -404,12 +402,12 @@ abstract class FSConnection extends StrictLogging {
       command.success
     }
     def performConnectionInbound(
-        command: EventMessage,
+        headers: Map[String, String],
         isConnectingForFirstTime: Boolean
     ) = {
       if (isConnectingForFirstTime) {
         fsConnectionPromise.complete(
-          Success(FSSocket(fsConnection, ChannelData(command.headers)))
+          Success(FSSocket(fsConnection, ChannelData(headers)))
         )
         if (needToLinger) publishNonMappingCommand(LingerCommand)
       }
@@ -439,6 +437,8 @@ abstract class FSConnection extends StrictLogging {
         var isFiltering: Boolean = false
         val buffer: mutable.ListBuffer[FSData] =
           mutable.ListBuffer.empty[FSData]
+
+        var hMap = mutable.HashMap.empty[String, String]
 
         var authenticated = !isInbound
 
@@ -553,22 +553,41 @@ abstract class FSConnection extends StrictLogging {
 
             } else if (!hasConnected) {
 
-              lazy val (connection, allMsgsOtherThanConnection) = {
+              val connectionHeaders = Set(
+                "CHANNEL_CALLSTATE",
+                "CHANNEL_PROGRESS",
+                "CHANNEL_STATE",
+                "PRESENCE_IN",
+                "CHANNEL_ORIGINATE",
+                "CHANNEL_CREATE",
+                "CHANNEL_OUTGOING"
+              )
+
+              lazy val (
+                connection,
+                connectionMsgs,
+                allMsgsOtherThanConnection
+              ) = {
                 if (isInbound) {
-                  val connection = fSData.fsMessages.collectFirst({
+                  fSData.fsMessages.collect({
                     case event: EventMessage
-                        if event.eventName.fold(false)(
-                          _ == EventNames.ChannelCreate
+                        if event.eventName.fold(false)(e =>
+                          connectionHeaders.contains(e.name)
                         ) && event.uuid.fold(false)(_ == callId) =>
-                      event
+                      event.headers.foreach({
+                        case (key, value) =>
+                          hMap.getOrElseUpdate(key, value)
+                      })
                   })
-                  if (connection.isDefined) {
+
+                  val connection = hMap.contains("variable_sip_call_id")
+                  if (connection) {
                     hasConnected = performConnectionInbound(
-                      connection.get,
+                      hMap.toMap,
                       !wasOnceConnected
                     )
                   }
-                  (connection.toList, fSData.fsMessages)
+                  (connection, Nil, fSData.fsMessages)
                 } else {
                   val (connection, allMsgsOtherThanConnection) =
                     fSData.fsMessages.partition({
@@ -583,7 +602,7 @@ abstract class FSConnection extends StrictLogging {
                       !wasOnceConnected
                     )
                   }
-                  (connection, allMsgsOtherThanConnection)
+                  (connection.nonEmpty, connection, allMsgsOtherThanConnection)
                 }
               }
 
@@ -608,12 +627,12 @@ abstract class FSConnection extends StrictLogging {
                   )
                   fSData
                 }
-                if (connection.nonEmpty && hasConnected) {
+                if (connection && hasConnected) {
                   wasOnceConnected = true
                 }
                 newFsData
               } else {
-                if (connection.nonEmpty) {
+                if (connection) {
                   wasOnceConnected = true
                   if (hasConnected) {
                     val allMessages = fSData.copy(fsMessages =
@@ -627,8 +646,8 @@ abstract class FSConnection extends StrictLogging {
                     onFsMsgCallbacks.foreach(
                       _.lift(
                         fSData.fsMessages,
-                        s"NOW CONNECTED : hasConnected=$hasConnected ;isAuthenticated:$authenticated isConnect=true ; ${removedFsMsgs.length + connection.length}/${allMessages.fsMessages.length} messages dropped",
-                        removedFsMsgs ++ connection
+                        s"NOW CONNECTED : hasConnected=$hasConnected ;isAuthenticated:$authenticated isConnect=true ; ${removedFsMsgs.length + connectionMsgs.length}/${allMessages.fsMessages.length} messages dropped",
+                        removedFsMsgs ++ connectionMsgs
                       )
                     )
                     filteredFs
@@ -639,8 +658,8 @@ abstract class FSConnection extends StrictLogging {
                     onFsMsgCallbacks.foreach(
                       _.lift(
                         fSData.fsMessages,
-                        s"ATTEMPT CONNECTION : hasConnected=$hasConnected ; isAuthenticated:$authenticated ; isConnect=true; ${connection.length}/${fSData.fsMessages.length} messages dropped",
-                        connection
+                        s"ATTEMPT CONNECTION : hasConnected=$hasConnected ; isAuthenticated:$authenticated ; isConnect=true; ${connectionMsgs.length}/${fSData.fsMessages.length} messages dropped",
+                        connectionMsgs
                       )
                     )
                     fSData.copy(fsMessages = Nil)
@@ -703,7 +722,7 @@ abstract class FSConnection extends StrictLogging {
         }
       })
       .addAttributes(ActorAttributes.supervisionStrategy(decider("fs-init")))
-      .toMat(futureSink)(Keep.right)
+      .toMat(sink)(Keep.right)
 
   }
 
