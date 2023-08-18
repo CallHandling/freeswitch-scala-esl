@@ -127,7 +127,9 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
     case x => Some(x.trim)
   })
 
-  val jobUuid: Option[String] = headers.get(HeaderNames.jobUUID)
+  lazy val jobUuid: Option[String] = headers.get(HeaderNames.jobUUID)
+  lazy val jobCommand: Option[String] = headers.get(HeaderNames.jobCommand)
+  lazy val jobCommandArg: Option[String] = headers.get(HeaderNames.jobCommandArg)
 
   val callerUniqueId: Option[String] = headers.get(HeaderNames.callerUniqueId)
 
