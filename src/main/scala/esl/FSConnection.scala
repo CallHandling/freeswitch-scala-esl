@@ -563,7 +563,7 @@ abstract class FSConnection extends StrictLogging {
                 "CHANNEL_OUTGOING"
               )
 
-              lazy val (
+              val (
                 connection,
                 connectionMsgs,
                 allMsgsOtherThanConnection
@@ -585,6 +585,21 @@ abstract class FSConnection extends StrictLogging {
                     hasConnected = performConnectionInbound(
                       hMap.toMap,
                       !wasOnceConnected
+                    )
+                    logger.info(
+                      """CALL ID OUTBOUND {} CONNECTED
+                        |Agg Headers
+                        |{}""".stripMargin,
+                      callId,
+                      hMap.mkString("\n")
+                    )
+                  } else {
+                    logger.debug(
+                      """CALL ID OUTBOUND {} WAITING FOR CONNECTION
+                        |Agg Headers
+                        |{}""".stripMargin,
+                      callId,
+                      hMap.mkString("\n")
                     )
                   }
                   (connection, Nil, fSData.fsMessages)
