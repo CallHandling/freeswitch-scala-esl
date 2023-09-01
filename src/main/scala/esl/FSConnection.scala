@@ -402,12 +402,12 @@ abstract class FSConnection extends StrictLogging {
       command.success
     }
     def performConnectionInbound(
-        headers: Map[String, String],
+        result: Try[FSSocket[FS]],
         isConnectingForFirstTime: Boolean
     ) = {
       if (isConnectingForFirstTime) {
         fsConnectionPromise.complete(
-          Success(FSSocket(fsConnection, ChannelData(headers)))
+          result
         )
         if (needToLinger) publishNonMappingCommand(LingerCommand)
       }
@@ -553,15 +553,25 @@ abstract class FSConnection extends StrictLogging {
 
             } else if (!hasConnected) {
 
-              val connectionHeaders = Set(
-                "CHANNEL_CALLSTATE",
-                "CHANNEL_PROGRESS",
-                "CHANNEL_STATE",
-                "PRESENCE_IN",
-                "CHANNEL_ORIGINATE",
-                "CHANNEL_CREATE",
-                "CHANNEL_OUTGOING"
-              )
+              def isAnswered(eventMessage: EventMessage) = {
+                eventMessage.eventName.fold(false)(
+                  _.name == "CHANNEL_STATE"
+                ) && eventMessage.headers
+                  .get("Channel-Call-State")
+                  .contains("ACTIVE")
+              }
+
+              def isConnectionError(eventMessage: EventMessage) = {
+                val earlyStates = Set("DOWN", "DIALING", "RINGING", "EARLY")
+                val endStates = Set("HANGUP")
+                eventMessage.eventName.fold(false)(
+                  _.name == "CHANNEL_CALLSTATE"
+                ) && eventMessage.headers
+                  .get("Original-Channel-Call-State")
+                  .exists(earlyStates.contains) && eventMessage.headers
+                  .get("Channel-Call-State")
+                  .exists(endStates.contains)
+              }
 
               val (
                 connection,
@@ -569,40 +579,69 @@ abstract class FSConnection extends StrictLogging {
                 allMsgsOtherThanConnection
               ) = {
                 if (isInbound) {
-                  fSData.fsMessages.collect({
-                    case event: EventMessage
-                        if event.eventName.fold(false)(e =>
-                          connectionHeaders.contains(e.name)
-                        ) && event.uuid.fold(false)(_ == callId) =>
-                      event.headers.foreach({
-                        case (key, value) =>
-                          hMap.getOrElseUpdate(key, value)
-                      })
-                  })
+                  val isConnectOrDisconnect = fSData.fsMessages
+                    .collect({
+                      case event: EventMessage
+                          if event.channelCallUUID.fold(false)(_ == callId) =>
+                        event.headers.foreach({
+                          case (key, value) =>
+                            hMap.getOrElseUpdate(key, value)
+                        })
 
-                  val connection = hMap.contains("variable_sip_call_id")
-                  if (connection) {
-                    hasConnected = performConnectionInbound(
-                      hMap.toMap,
-                      !wasOnceConnected
-                    )
-                    logger.info(
-                      """CALL ID OUTBOUND {} CONNECTED
-                        |Agg Headers
-                        |{}""".stripMargin,
-                      callId,
-                      hMap.mkString("\n")
-                    )
-                  } else {
-                    logger.debug(
-                      """CALL ID OUTBOUND {} WAITING FOR CONNECTION
-                        |Agg Headers
-                        |{}""".stripMargin,
-                      callId,
-                      hMap.mkString("\n")
-                    )
+                        if (isAnswered(event)) {
+                          Some(true)
+                        } else if (isConnectionError(event)) {
+                          Some(false)
+                        } else Option.empty[Boolean]
+                    })
+                    .collectFirst({
+                      case Some(value) => value
+                    })
+
+                  isConnectOrDisconnect match {
+                    case Some(true) => {
+                      hasConnected = performConnectionInbound(
+                        Success(
+                          FSSocket(fsConnection, ChannelData(hMap.toMap))
+                        ),
+                        !wasOnceConnected
+                      )
+                      logger.info(
+                        """CALL ID OUTBOUND {} CONNECTED
+                          |Agg Headers
+                          |{}""".stripMargin,
+                        callId,
+                        hMap.mkString("\n")
+                      )
+                    }
+                    case Some(false) => {
+                      hasConnected = performConnectionInbound(
+                        Failure(
+                          FSSocketError(fsConnection, ChannelData(hMap.toMap))(
+                            "TODO"
+                          )
+                        ),
+                        !wasOnceConnected
+                      )
+                      logger.info(
+                        """CALL ID OUTBOUND {} CONNECTION ERROR
+                          |Agg Headers
+                          |{}""".stripMargin,
+                        callId,
+                        hMap.mkString("\n")
+                      )
+                    }
+                    case _ => {
+                      logger.debug(
+                        """CALL ID OUTBOUND {} WAITING FOR CONNECTION
+                          |Agg Headers
+                          |{}""".stripMargin,
+                        callId,
+                        hMap.mkString("\n")
+                      )
+                    }
                   }
-                  (connection, Nil, fSData.fsMessages)
+                  (isConnectOrDisconnect, Nil, fSData.fsMessages)
                 } else {
                   val (connection, allMsgsOtherThanConnection) =
                     fSData.fsMessages.partition({
@@ -617,7 +656,12 @@ abstract class FSConnection extends StrictLogging {
                       !wasOnceConnected
                     )
                   }
-                  (connection.nonEmpty, connection, allMsgsOtherThanConnection)
+                  (
+                    if (connection.nonEmpty) Some(true)
+                    else Option.empty[Boolean],
+                    connection,
+                    allMsgsOtherThanConnection
+                  )
                 }
               }
 
@@ -642,12 +686,12 @@ abstract class FSConnection extends StrictLogging {
                   )
                   fSData
                 }
-                if (connection && hasConnected) {
+                if (connection.isDefined && hasConnected) {
                   wasOnceConnected = true
                 }
                 newFsData
               } else {
-                if (connection) {
+                if (connection.getOrElse(false)) {
                   wasOnceConnected = true
                   if (hasConnected) {
                     val allMessages = fSData.copy(fsMessages =
@@ -1581,6 +1625,12 @@ object FSConnection {
       fsConnection: FS,
       channelData: ChannelData
   )
+
+  case class FSSocketError[+FS <: FSConnection](
+      fsConnection: FS,
+      channelData: ChannelData
+  )(cause: String)
+      extends Exception(s"FSSocket failed $cause")
 
   case class FSData(fSConnection: FSConnection, fsMessages: List[FSMessage])
 
