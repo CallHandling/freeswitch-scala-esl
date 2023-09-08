@@ -319,7 +319,8 @@ object CallCommands {
       val vars = Seq(
         "ignore_early_media=false",
         s"originate_timeout=${timeout.toSeconds}",
-        s"origination_uuid=$uniqueId"
+        s"origination_uuid=$uniqueId",
+        "dtmf_type=rfc2833"
       ) ++
         numberPresentation.asOriginateArgs ++
         retries.map(_.asOriginateArgs).getOrElse(Nil)
@@ -555,14 +556,19 @@ object CallCommands {
     override val args: String = numberOfMillis.toMillis.toString
   }
 
+  final case class OffHold(config: ApplicationCommandConfig)
+    extends FSCommand {
+    override def toString: String = s"bgapi uuid_hold off ${config.channelUuid}${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
+  }
+
   case class Hold(config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "hold"
-    override val args: String = ""
+    override val args: String = config.channelUuid
   }
-  case class OffHold(config: ApplicationCommandConfig) extends FSExecuteApp {
-    override val application: String = "unhold"
-    override val args: String = ""
-  }
+//  case class OffHold(config: ApplicationCommandConfig) extends FSExecuteApp {
+//    override val application: String = "unhold"
+//    override val args: String = config.channelUuid
+//  }
 
   /**
     * pre_answer establishes media (early media) but does not answer.
