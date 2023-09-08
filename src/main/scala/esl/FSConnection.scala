@@ -842,6 +842,33 @@ abstract class FSConnection extends StrictLogging {
       eventMessage.uuid,
       eventMessage.eventName
     ) match {
+      case (_, _, _, Some(EventNames.ChannelUnhold)) =>
+        for {
+          channelId <- eventMessage.uuid
+          command <- eventMap.collectFirst { //TODO change eventMap key for this command
+            case (_, queCommand@CommandToQueue(command: OffHold, _, _)) if command.config.channelUuid == channelId => queCommand
+          }
+        } yield {
+          command.executeComplete.complete(Success(eventMessage))
+          if (command.executeEvent.isCompleted) {
+            adapter.info(
+              logMarker,
+              s"""Channel call state event for callId
+                 |${eventMessage.headers("Caller-Unique-ID")}
+                 |>> MAP command is below
+                 |${
+                eventMap
+                  .map({ item =>
+                    s"""appId: ${item._1}
+                       |command
+                       |${item._2.command}
+                       |command type ${item._2.command.getClass}""".stripMargin
+                  })
+                  .mkString("\n")
+              }""".stripMargin
+            )
+          }
+        }
       case (_, Some(commandToQueue), _, Some(EventNames.ChannelExecute))
           if !eventMessage.answerState.contains(AnswerStates.Early) =>
         commandToQueue.executeEvent.complete(Success(eventMessage))
@@ -903,7 +930,63 @@ abstract class FSConnection extends StrictLogging {
       case (_, _, _, Some(EventNames.BackgroundJob))
           if eventMap.contains(eventMessage.jobUuid.getOrElse("")) =>
         val jobId = eventMap.get(eventMessage.jobUuid.getOrElse(""))
+
+        /*>> TYPE
+            EVENT BACKGROUND_JOB
+        >> HEADERS
+            Event-Date-GMT : Fri,%2018%20Aug%202023%2009%3A33%3A41%20GMT
+            Job-Owner-UUID : 2896817a-29f3-4d73-a7b5-1c177f921fb3
+            Event-Date-Local : 2023-08-18%2009%3A33%3A41
+            Job-Command : uuid_hold
+            Job-UUID : ad5f32b1-2f46-4886-9bac-2a621315dcba
+            FreeSWITCH-IPv6 : %3A%3A1
+            Event-Date-Timestamp : 1692351221822295
+            Event-Calling-Function : api_exec
+            Core-UUID : bc864664-8510-4bab-99e8-57499dc7575e
+            Event-Calling-Line-Number : 1572
+            Event-Calling-File : mod_event_socket.c
+            Content-Length : 12
+            Event-Sequence : 3833
+            Event-Name : BACKGROUND_JOB
+            Content-Type : text/event-plain
+            Job-Command-Arg : off%202896817a-29f3-4d73-a7b5-1c177f921fb3
+            FreeSWITCH-IPv4 : 192.168.0.109
+            FreeSWITCH-Switchname : sysgears-Latitude-3510
+            FreeSWITCH-Hostname : sysgears-Latitude-3510
+        >> BODY
+            +OK Success
+*/
         jobId match {
+          case Some(job) if(eventMessage.jobCommand.fold(false)(_ == "uuid_hold") && eventMessage.jobCommandArg.fold(false)(_.startsWith("off")))=>
+            job.executeEvent.complete(Success(eventMessage))
+            if (job.executeComplete.isCompleted) {
+              eventMap.remove(job.command.eventUuid)
+              adapter.info(
+                logMarker,
+                s"""handleFSEventMessage for background job id $jobId Removing entry
+                   |>> TYPE
+                   |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                   |>> HEADERS
+                   |${
+                  eventMessage.headers
+                    .map(h => h._1 + " : " + h._2)
+                    .mkString(space, "\n" + space, "")
+                }
+                   |>> BODY
+                   |${eventMessage.body}
+                   |>> MAP is below
+                   |${
+                  eventMap
+                    .map({ item =>
+                      s"""appId: ${item._1}
+                         |command
+                         |${item._2.command}""".stripMargin
+                    })
+                    .mkString("\n")
+                }""".stripMargin
+              )
+            }
+
           case Some(job) =>
             job.executeComplete.complete(Success(eventMessage))
             if (job.executeEvent.isCompleted)
