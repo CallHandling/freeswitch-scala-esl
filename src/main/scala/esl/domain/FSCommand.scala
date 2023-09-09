@@ -22,6 +22,7 @@ import esl.domain.EventNames.EventName
 import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import CallCommands.{LINE_TERMINATOR, MESSAGE_TERMINATOR}
+import esl.domain.CallCommands.Dial.DialConfig
 import esl.domain.HangupCauses.HangupCause
 
 import scala.language.postfixOps
@@ -77,6 +78,8 @@ object CallCommands {
 
   private implicit class CommandVarsSyntax(private val vars: Seq[String]) {
     def asVarsString: String = vars.mkString("{", ",", "}")
+
+    def asCommandArgs: String = vars.mkString("[", ",", "]")
   }
 
   val MESSAGE_TERMINATOR = "\n\n"
@@ -249,7 +252,10 @@ object CallCommands {
   object ConferenceCommand {
 
     sealed trait ConferenceCommandType {
-      def forConference(conferenceId:String, config: ApplicationCommandConfig) : ConferenceCommand
+      def forConference(
+          conferenceId: String,
+          config: ApplicationCommandConfig
+      ): ConferenceCommand
     }
     final case class Play(
         file: String,
@@ -267,7 +273,10 @@ object CallCommands {
           case _                         => ""
         }}"
 
-      override def forConference(conferenceId: String, config: ApplicationCommandConfig): ConferenceCommand = {
+      override def forConference(
+          conferenceId: String,
+          config: ApplicationCommandConfig
+      ): ConferenceCommand = {
         ConferenceCommand(conferenceId, this, config)
       }
     }
@@ -276,13 +285,16 @@ object CallCommands {
 
       override def toString: String = "pause_play"
 
-      override def forConference(conferenceId: String, config: ApplicationCommandConfig): ConferenceCommand = {
+      override def forConference(
+          conferenceId: String,
+          config: ApplicationCommandConfig
+      ): ConferenceCommand = {
         ConferenceCommand(conferenceId, this, config)
       }
     }
   }
 
-/*
+  /*
   final case class Dial(
                          target: String,
                          uniqueId: String,
@@ -305,34 +317,71 @@ object CallCommands {
     }
   }*/
 
-  final case class Dial(
-      target: String,
-      uniqueId: String,
-      numberPresentation: Dial.NumberPresentation,
+  final case class ListenIn(
       config: ApplicationCommandConfig,
-      timeout: FiniteDuration,
-      retries: Option[Dial.Retry] = Option.empty
+      bargeIn: Boolean,
+      options: DialConfig,
+      listenCallId: String
+  ) extends FSCommand {
+    override def toString: String = {
+      if (bargeIn) {
+        s"""bgapi ${options.asOriginateCmd} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
+           |Job-UUID: $eventUuid
+           |
+           |""".stripMargin
+      } else {
+        s"""bgapi ${options.asOriginateCmd} &eavesdrop($listenCallId)
+           |Job-UUID: $eventUuid
+           |
+           |""".stripMargin
+      }
+    }
+  }
+
+  final case class Dial(
+      options: DialConfig,
+      config: ApplicationCommandConfig
   ) extends FSExecuteApp {
 
     override val application: String = "set"
     override lazy val args: String = {
-      val vars = Seq(
-        "ignore_early_media=false",
-        s"originate_timeout=${timeout.toSeconds}",
-        s"origination_uuid=$uniqueId",
-        "dtmf_type=rfc2833"
-      ) ++
-        numberPresentation.asOriginateArgs ++
-        retries.map(_.asOriginateArgs).getOrElse(Nil)
 
       s"""dial_$eventUuid=$${
-         |bgapi originate ${vars.asVarsString}$target &park()
+         |bgapi ${options.asOriginateCmd} &park()
          |Job-UUID: $eventUuid
-         |}""".stripMargin
+         |
+         |
+         |}
+         |
+         |""".stripMargin
     }
   }
 
   object Dial {
+
+    case class DialConfig(
+        target: String,
+        uniqueId: String,
+        numberPresentation: Dial.NumberPresentation,
+        timeout: FiniteDuration,
+        retries: Option[Dial.Retry] = Option.empty,
+        miscArgs: String = ""
+    ) {
+      def asOriginateCmd = {
+        val vars = Seq(
+          "ignore_early_media=false",
+          s"originate_timeout=${timeout.toSeconds}",
+          s"origination_uuid=$uniqueId",
+          "dtmf_type=rfc2833"
+        ) ++
+          numberPresentation.asOriginateArgs ++
+          retries.map(_.asOriginateArgs).getOrElse(Nil) ++ {
+          if (miscArgs.isBlank) Seq.empty else Seq(miscArgs.trim)
+        }
+        s"originate ${vars.asVarsString}$target"
+      }
+
+    }
 
     case class Retry(retries: Int = 1, sleep: FiniteDuration = 5 seconds) {
       def asOriginateArgs: Seq[String] = {
@@ -407,8 +456,9 @@ object CallCommands {
   }
 
   final case class CreateUUID(config: ApplicationCommandConfig)
-    extends FSCommand {
-    override def toString: String =s"bgapi create_uuid $eventUuid${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
+      extends FSCommand {
+    override def toString: String =
+      s"bgapi create_uuid $eventUuid${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }
 
   /**
@@ -444,7 +494,7 @@ object CallCommands {
   }
 
   final case class FilterX(filter: String, config: ApplicationCommandConfig)
-    extends FSCommand {
+      extends FSCommand {
     override def toString: String =
       s"filter ${filter}$MESSAGE_TERMINATOR"
   }
@@ -556,9 +606,9 @@ object CallCommands {
     override val args: String = numberOfMillis.toMillis.toString
   }
 
-  final case class OffHold(config: ApplicationCommandConfig)
-    extends FSCommand {
-    override def toString: String = s"bgapi uuid_hold off ${config.channelUuid}${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
+  final case class OffHold(config: ApplicationCommandConfig) extends FSCommand {
+    override def toString: String =
+      s"bgapi uuid_hold off ${config.channelUuid}${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }
 
   case class Hold(config: ApplicationCommandConfig) extends FSExecuteApp {

@@ -166,7 +166,7 @@ class FSConnectionSpec
     }
 
     "FS answer command" in new FSConnectionFixture {
-      val commandResponse = connection.answer()
+      val commandResponse = connection.-answer()
       whenReady(commandResponse) { response =>
         val fSCommand =
           s"sendmsg \nEvent-UUID: ${response.command.eventUuid}\ncall-command: execute\nexecute-app-name: answer\n\n\n"

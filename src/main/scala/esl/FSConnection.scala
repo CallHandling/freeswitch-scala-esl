@@ -42,6 +42,7 @@ import scala.util.{Failure, Success, Try}
 import java.util.UUID
 import akka.event.{LogMarker, MarkerLoggingAdapter}
 import com.typesafe.scalalogging.StrictLogging
+import esl.domain.CallCommands.Dial.DialConfig
 
 abstract class FSConnection extends StrictLogging {
   self =>
@@ -845,9 +846,12 @@ abstract class FSConnection extends StrictLogging {
       case (_, _, _, Some(EventNames.ChannelUnhold)) =>
         for {
           channelId <- eventMessage.uuid
-          command <- eventMap.collectFirst { //TODO change eventMap key for this command
-            case (_, queCommand@CommandToQueue(command: OffHold, _, _)) if command.config.channelUuid == channelId => queCommand
-          }
+          command <-
+            eventMap.collectFirst { //TODO change eventMap key for this command
+              case (_, queCommand @ CommandToQueue(command: OffHold, _, _))
+                  if command.config.channelUuid == channelId =>
+                queCommand
+            }
         } yield {
           command.executeComplete.complete(Success(eventMessage))
           if (command.executeEvent.isCompleted) {
@@ -856,16 +860,14 @@ abstract class FSConnection extends StrictLogging {
               s"""Channel call state event for callId
                  |${eventMessage.headers("Caller-Unique-ID")}
                  |>> MAP command is below
-                 |${
-                eventMap
-                  .map({ item =>
-                    s"""appId: ${item._1}
+                 |${eventMap
+                .map({ item =>
+                  s"""appId: ${item._1}
                        |command
                        |${item._2.command}
                        |command type ${item._2.command.getClass}""".stripMargin
-                  })
-                  .mkString("\n")
-              }""".stripMargin
+                })
+                .mkString("\n")}""".stripMargin
             )
           }
         }
@@ -955,9 +957,14 @@ abstract class FSConnection extends StrictLogging {
             FreeSWITCH-Hostname : sysgears-Latitude-3510
         >> BODY
             +OK Success
-*/
+         */
         jobId match {
-          case Some(job) if(eventMessage.jobCommand.fold(false)(_ == "uuid_hold") && eventMessage.jobCommandArg.fold(false)(_.startsWith("off")))=>
+          case Some(job)
+              if (eventMessage.jobCommand.fold(false)(
+                _ == "uuid_hold"
+              ) && eventMessage.jobCommandArg.fold(false)(
+                _.startsWith("off")
+              )) =>
             job.executeEvent.complete(Success(eventMessage))
             if (job.executeComplete.isCompleted) {
               eventMap.remove(job.command.eventUuid)
@@ -967,23 +974,19 @@ abstract class FSConnection extends StrictLogging {
                    |>> TYPE
                    |EVENT ${eventMessage.eventName.getOrElse("NA")}
                    |>> HEADERS
-                   |${
-                  eventMessage.headers
-                    .map(h => h._1 + " : " + h._2)
-                    .mkString(space, "\n" + space, "")
-                }
+                   |${eventMessage.headers
+                  .map(h => h._1 + " : " + h._2)
+                  .mkString(space, "\n" + space, "")}
                    |>> BODY
                    |${eventMessage.body}
                    |>> MAP is below
-                   |${
-                  eventMap
-                    .map({ item =>
-                      s"""appId: ${item._1}
+                   |${eventMap
+                  .map({ item =>
+                    s"""appId: ${item._1}
                          |command
                          |${item._2.command}""".stripMargin
-                    })
-                    .mkString("\n")
-                }""".stripMargin
+                  })
+                  .mkString("\n")}""".stripMargin
               )
             }
 
@@ -1035,7 +1038,7 @@ abstract class FSConnection extends StrictLogging {
             case (_, command) =>
               command.command.isInstanceOf[Dial] &&
                 eventMessage.callerUniqueId.contains(
-                  command.command.asInstanceOf[Dial].uniqueId
+                  command.command.asInstanceOf[Dial].options.uniqueId
                 )
           }
         adapter.info(s"Command from map $findResult")
@@ -1067,7 +1070,7 @@ abstract class FSConnection extends StrictLogging {
             case (_, command) =>
               command.command.isInstanceOf[Dial] &&
                 eventMessage.callerUniqueId.contains(
-                  command.command.asInstanceOf[Dial].uniqueId
+                  command.command.asInstanceOf[Dial].options.uniqueId
                 )
           }
         adapter.info(s"Command from map $findResult")
@@ -1208,6 +1211,17 @@ abstract class FSConnection extends StrictLogging {
       config: ApplicationCommandConfig = ApplicationCommandConfig()
   ): Future[CommandResponse] =
     publishCommand(TransferTo(extension, config))
+
+  def listen(
+      bargeIn: Boolean,
+      options: DialConfig,
+      listenCallId: String,
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] = {
+    publishCommand(
+      ListenIn(config, bargeIn, options, listenCallId)
+    )
+  }
 
   /**
     * Hangs up a channel, with an optional cause code supplied.
