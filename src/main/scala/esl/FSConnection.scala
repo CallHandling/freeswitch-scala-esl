@@ -837,9 +837,13 @@ abstract class FSConnection extends StrictLogging {
     * @return EventMessage
     */
   private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
-    def completeAndRemoveFromMap(command: FSExecuteApp, executeComplete: Promise[EventMessage]): Unit = {
+    def completeAndRemoveFromMap(
+      command: FSExecuteApp,
+      executeComplete: Promise[EventMessage],
+      canRemove: Boolean
+    ): Unit = {
       executeComplete.complete(Success(eventMessage))
-      if (executeComplete.isCompleted) {
+      if (canRemove) {
         eventMap.remove(command.eventUuid)
         adapter.info(
           logMarker,
@@ -934,18 +938,18 @@ abstract class FSConnection extends StrictLogging {
         )
       case (
             Some(appId),
-            Some(CommandToQueue(command: Record, _, executeComplete)),
+            Some(CommandToQueue(command: Record, execute, executeComplete)),
             _,
             Some(EventNames.ChannelExecuteComplete)
           ) if appId == command.eventUuid =>
-        completeAndRemoveFromMap(command, executeComplete)
+        completeAndRemoveFromMap(command, executeComplete, execute.isCompleted)
       case (
             Some(appId),
-            Some(CommandToQueue(command: PlayFile, _, executeComplete)),
+            Some(CommandToQueue(command: PlayFile, execute, executeComplete)),
             _,
             Some(EventNames.ChannelExecuteComplete)
           ) if appId == command.eventUuid =>
-        completeAndRemoveFromMap(command, executeComplete)
+        completeAndRemoveFromMap(command, executeComplete, execute.isCompleted)
       case (Some(appId), _, _, _) =>
         adapter.warning(
           logMarker,
