@@ -837,6 +837,40 @@ abstract class FSConnection extends StrictLogging {
     * @return EventMessage
     */
   private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
+    def completeAndRemoveFromMap(
+      command: FSExecuteApp,
+      executeComplete: Promise[EventMessage],
+      canRemove: Boolean
+    ): Unit = {
+      executeComplete.complete(Success(eventMessage))
+      if (canRemove) {
+        eventMap.remove(command.eventUuid)
+        adapter.info(
+          logMarker,
+          s"""handleFSEventMessage for app id ${command.eventUuid} Removing entry
+             |>> TYPE
+             |EVENT ${eventMessage.eventName.getOrElse("NA")}
+             |>> HEADERS
+             |${
+            eventMessage.headers
+              .map(h => h._1 + " : " + h._2)
+              .mkString(space, "\n" + space, "")
+          }
+             |>> BODY
+             |${eventMessage.body}
+             |>> MAP is below
+             |${
+            eventMap.map({ case (key, value) =>
+                s"""appId: $key
+                   |command
+                   |$value""".stripMargin
+              })
+              .mkString("\n")
+          }""".stripMargin
+        )
+      }
+    }
+
     (
       eventMessage.applicationUuid,
       eventMessage.applicationUuid.flatMap(eventMap.get),
@@ -902,6 +936,20 @@ abstract class FSConnection extends StrictLogging {
             })
             .mkString("\n")}""".stripMargin
         )
+      case (
+            Some(appId),
+            Some(CommandToQueue(command: Record, execute, executeComplete)),
+            _,
+            Some(EventNames.ChannelExecuteComplete)
+          ) if appId == command.eventUuid =>
+        completeAndRemoveFromMap(command, executeComplete, execute.isCompleted)
+      case (
+            Some(appId),
+            Some(CommandToQueue(command: PlayFile, execute, executeComplete)),
+            _,
+            Some(EventNames.ChannelExecuteComplete)
+          ) if appId == command.eventUuid =>
+        completeAndRemoveFromMap(command, executeComplete, execute.isCompleted)
       case (Some(appId), _, _, _) =>
         adapter.warning(
           logMarker,
