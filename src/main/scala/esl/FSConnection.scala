@@ -837,6 +837,36 @@ abstract class FSConnection extends StrictLogging {
     * @return EventMessage
     */
   private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
+    def completeAndRemoveFromMap(command: FSExecuteApp, executeComplete: Promise[EventMessage]): Unit = {
+      executeComplete.complete(Success(eventMessage))
+      if (executeComplete.isCompleted) {
+        eventMap.remove(command.eventUuid)
+        adapter.info(
+          logMarker,
+          s"""handleFSEventMessage for app id ${command.eventUuid} Removing entry
+             |>> TYPE
+             |EVENT ${eventMessage.eventName.getOrElse("NA")}
+             |>> HEADERS
+             |${
+            eventMessage.headers
+              .map(h => h._1 + " : " + h._2)
+              .mkString(space, "\n" + space, "")
+          }
+             |>> BODY
+             |${eventMessage.body}
+             |>> MAP is below
+             |${
+            eventMap.map({ case (key, value) =>
+                s"""appId: $key
+                   |command
+                   |$value""".stripMargin
+              })
+              .mkString("\n")
+          }""".stripMargin
+        )
+      }
+    }
+
     (
       eventMessage.applicationUuid,
       eventMessage.applicationUuid.flatMap(eventMap.get),
@@ -902,72 +932,20 @@ abstract class FSConnection extends StrictLogging {
             })
             .mkString("\n")}""".stripMargin
         )
-      case (Some(appId), Some(commandToQueue), _, Some(EventNames.ChannelExecuteComplete)) =>
-        commandToQueue.command match {
-          case recordCmd: Record =>
-            commandToQueue.executeComplete.complete(Success(eventMessage))
-            eventMap.remove(recordCmd.eventUuid)
-            adapter.info(
-              logMarker,
-              s"""handleFSEventMessage for app id $appId Removing entry
-                 |>> TYPE
-                 |EVENT ${eventMessage.eventName.getOrElse("NA")}
-                 |>> HEADERS
-                 |${eventMessage.headers
-                  .map(h => h._1 + " : " + h._2)
-                  .mkString(space, "\n" + space, "")}
-                 |>> BODY
-                 |${eventMessage.body}
-                 |>> MAP is below
-                 |${eventMap.map({ case (key, value) =>
-                  s"""appId: $key
-                     |command
-                     |$value""".stripMargin
-                  })
-                .mkString("\n")}""".stripMargin
-            )
-          case playFileCmd: PlayFile =>
-            commandToQueue.executeComplete.complete(Success(eventMessage))
-            eventMap.remove(playFileCmd.eventUuid)
-            adapter.info(
-              logMarker,
-              s"""handleFSEventMessage for app id $appId Removing entry
-                 |>> TYPE
-                 |EVENT ${eventMessage.eventName.getOrElse("NA")}
-                 |>> HEADERS
-                 |${
-                eventMessage.headers
-                  .map(h => h._1 + " : " + h._2)
-                  .mkString(space, "\n" + space, "")
-              }
-                 |>> BODY
-                 |${eventMessage.body}
-                 |>> MAP is below
-                 |${
-                eventMap.map({ case (key, value) =>
-                    s"""appId: $key
-                       |command
-                       |$value""".stripMargin
-                  })
-                  .mkString("\n")
-              }""".stripMargin
-            )
-          case _ =>
-            adapter.warning(
-              logMarker,
-              s"""handleFSEventMessage for app id $appId Unable to handle Command (unexpected eventName header)
-                 |>> TYPE
-                 |EVENT ${eventMessage.eventName.getOrElse("NA")}
-                 |>> HEADERS
-                 |${
-                eventMessage.headers
-                  .map(h => h._1 + " : " + h._2)
-                  .mkString(space, "\n" + space, "")
-              }
-                 |>> BODY
-                 |${eventMessage.body}""".stripMargin
-            )
-        }
+      case (
+            Some(appId),
+            Some(CommandToQueue(command: Record, _, executeComplete)),
+            _,
+            Some(EventNames.ChannelExecuteComplete)
+          ) if appId == command.eventUuid =>
+        completeAndRemoveFromMap(command, executeComplete)
+      case (
+            Some(appId),
+            Some(CommandToQueue(command: PlayFile, _, executeComplete)),
+            _,
+            Some(EventNames.ChannelExecuteComplete)
+          ) if appId == command.eventUuid =>
+        completeAndRemoveFromMap(command, executeComplete)
       case (Some(appId), _, _, _) =>
         adapter.warning(
           logMarker,
