@@ -899,16 +899,13 @@ abstract class FSConnection extends StrictLogging {
         )
         val findResult =
           eventMap.find { //TODO change eventMap key for this command
-            case (_, command) =>
-              (command.command.isInstanceOf[AddToConference] &&
-                eventMessage.conferenceName.contains(
-                  command.command.asInstanceOf[AddToConference].conferenceId
-                ) && eventMessage.action.contains("add-member")) || (
-                command.command.isInstanceOf[LeaveConference] &&
-                  eventMessage.conferenceName.contains(
-                    command.command.asInstanceOf[LeaveConference].conferenceId
-                  ) && eventMessage.action.contains("delete-member")
-              )
+            case (_, CommandToQueue(command: AddToConference, _, _)) if eventMessage.conferenceName.contains(
+                  command.conferenceId
+                ) && eventMessage.action.contains("add-member") => true
+            case (_, CommandToQueue(command: LeaveConference, _, _)) if eventMessage.conferenceName.contains(
+              command.conferenceId
+            ) && eventMessage.action.contains("delete-member") => true
+            case _ => false
           }
         findResult match {
           case Some((key, command)) =>
@@ -1158,11 +1155,9 @@ abstract class FSConnection extends StrictLogging {
         )
         val findResult =
           eventMap.find { //TODO change eventMap key for this command
-            case (_, command) =>
-              command.command.isInstanceOf[Dial] &&
-                eventMessage.callerUniqueId.contains(
-                  command.command.asInstanceOf[Dial].options.uniqueId
-                )
+            case (_, CommandToQueue(command: Dial, _, _)) if
+              eventMessage.callerUniqueId.contains(command.options.uniqueId) => true
+            case _ => false
           }
         adapter.info(s"Command from map $findResult")
         findResult match {
