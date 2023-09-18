@@ -877,9 +877,50 @@ abstract class FSConnection extends StrictLogging {
       eventMessage.uuid,
       eventMessage.eventName
     ) match {
-      case (_, _, _, Some(EventNames.ChannelUnhold)) =>
+      case (_, _, _, Some(EventNames.Custom))
+        if eventMessage.conferenceName.isDefined &&
+          (eventMessage.action.contains("add-member") ||
+            eventMessage.action.contains("delete-member")) =>
+        adapter.info(
+          logMarker,
+          s"""Channel custom event ${eventMessage.action} for callId
+             |${eventMessage.headers.get("Unique-ID")}
+             |>> MAP command is below
+             |${
+            eventMap
+              .map({ item =>
+                s"""appId: ${item._1}
+                   |command
+                   |${item._2.command}
+                   |command type ${item._2.command.getClass}""".stripMargin
+              })
+              .mkString("\n")
+          }""".stripMargin
+        )
+        val findResult =
+          eventMap.find { //TODO change eventMap key for this command
+            case (_, command) =>
+              (command.command.isInstanceOf[AddToConference] &&
+                eventMessage.conferenceName.contains(
+                  command.command.asInstanceOf[AddToConference].conferenceId
+                ) && eventMessage.action.contains("add-member")) || (
+                command.command.isInstanceOf[LeaveConference] &&
+                  eventMessage.conferenceName.contains(
+                    command.command.asInstanceOf[LeaveConference].conferenceId
+                  ) && eventMessage.action.contains("delete-member")
+              )
+          }
+        findResult match {
+          case Some((key, command)) =>
+            if (!command.executeComplete.isCompleted)
+              command.executeComplete.complete(Success(eventMessage))
+            if (command.executeEvent.isCompleted) eventMap.remove(key)
+          case _ =>
+        }
+
+      case (_, _, uuid, Some(EventNames.ChannelUnhold)) =>
         for {
-          channelId <- eventMessage.uuid
+          channelId <- uuid
           command <-
             eventMap.collectFirst { //TODO change eventMap key for this command
               case (_, queCommand @ CommandToQueue(command: OffHold, _, _))
@@ -906,14 +947,16 @@ abstract class FSConnection extends StrictLogging {
           }
         }
       case (_, Some(commandToQueue), _, Some(EventNames.ChannelExecute))
-          if !eventMessage.answerState.contains(AnswerStates.Early) =>
+          if !eventMessage.answerState.contains(AnswerStates.Early) &&
+            !eventMessage.applicationName.contains("set") =>
         commandToQueue.executeEvent.complete(Success(eventMessage))
       case (
             Some(appId),
             Some(commandToQueue),
             _,
             Some(EventNames.ChannelExecuteComplete)
-          ) if !eventMessage.answerState.contains(AnswerStates.Early) =>
+          ) if !eventMessage.answerState.contains(AnswerStates.Early) &&
+        !eventMessage.applicationName.contains("set") =>
         commandToQueue.executeComplete.complete(Success(eventMessage))
         eventMap.remove(commandToQueue.command.eventUuid)
         adapter.info(
@@ -955,7 +998,7 @@ abstract class FSConnection extends StrictLogging {
           logMarker,
           s"""handleFSEventMessage for app id $appId Unable to handle Command (unexpected eventName header)
              |>> TYPE
-             |EVENT ${eventMessage.eventName.getOrElse("NA")}
+             |EVENT ${eventMessage.eventName.fold("NA")(_.name)}
              |>> HEADERS
              |${eventMessage.headers
             .map(h => h._1 + " : " + h._2)
