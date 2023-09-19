@@ -880,7 +880,7 @@ abstract class FSConnection extends StrictLogging {
       case (_, _, _, Some(EventNames.Custom))
         if eventMessage.conferenceName.isDefined &&
           (eventMessage.action.contains("add-member") ||
-            eventMessage.action.contains("delete-member")) =>
+            eventMessage.action.contains("del-member")) =>
         adapter.info(
           logMarker,
           s"""Channel custom event ${eventMessage.action} for callId
@@ -904,7 +904,7 @@ abstract class FSConnection extends StrictLogging {
                 ) && eventMessage.action.contains("add-member") => true
             case (_, CommandToQueue(command: LeaveConference, _, _)) if eventMessage.conferenceName.contains(
               command.conferenceId
-            ) && eventMessage.action.contains("delete-member") => true
+            ) && eventMessage.action.contains("del-member") => true
             case _ => false
           }
         findResult match {
