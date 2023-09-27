@@ -946,7 +946,10 @@ abstract class FSConnection extends StrictLogging {
       case (_, Some(commandToQueue), _, Some(EventNames.ChannelExecute))
           if !eventMessage.answerState.contains(AnswerStates.Early) &&
             !eventMessage.applicationName.contains("set") =>
-        commandToQueue.executeEvent.complete(Success(eventMessage))
+        if (!commandToQueue.executeEvent.isCompleted)
+          commandToQueue.executeEvent.complete(Success(eventMessage))
+        if (commandToQueue.executeComplete.isCompleted)
+          eventMap.remove(commandToQueue.command.eventUuid)
       case (
             Some(appId),
             Some(commandToQueue),
@@ -954,8 +957,10 @@ abstract class FSConnection extends StrictLogging {
             Some(EventNames.ChannelExecuteComplete)
           ) if !eventMessage.answerState.contains(AnswerStates.Early) &&
         !eventMessage.applicationName.contains("set") =>
-        commandToQueue.executeComplete.complete(Success(eventMessage))
-        eventMap.remove(commandToQueue.command.eventUuid)
+        if (!commandToQueue.executeComplete.isCompleted)
+          commandToQueue.executeComplete.complete(Success(eventMessage))
+        if (commandToQueue.executeEvent.isCompleted)
+          eventMap.remove(commandToQueue.command.eventUuid)
         adapter.info(
           logMarker,
           s"""handleFSEventMessage for app id $appId Removing entry
@@ -1648,7 +1653,7 @@ abstract class FSConnection extends StrictLogging {
   /**
     * Send DTMF digits from the session using the method(s) configured on the endpoint in use
     * If no duration is specified the default DTMF length of 2000ms will be used.
-    *
+    *ю
     * @param dtmfDigits   : String DTMF digits
     * @param toneDuration : Option[Duration] default is empty
     * @param config       : ApplicationCommandConfig
