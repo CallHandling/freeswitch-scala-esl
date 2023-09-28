@@ -231,7 +231,7 @@ object CallCommands {
       config: ApplicationCommandConfig
   ) extends FSExecuteApp {
     override val application: String = "conference"
-    override val args: String = s"hangup:$conferenceId"
+    override val args: String = s"kick:$conferenceId"
   }
 
   final case class ConferenceCommand(
@@ -284,6 +284,22 @@ object CallCommands {
     final case class PausePlay() extends ConferenceCommandType {
 
       override def toString: String = "pause_play"
+
+      override def forConference(
+          conferenceId: String,
+          config: ApplicationCommandConfig
+      ): ConferenceCommand = {
+        ConferenceCommand(conferenceId, this, config)
+      }
+    }
+
+    final case class SendCommand(memberId: Option[String], command: String)
+        extends ConferenceCommandType {
+      override def toString: String =
+        s"$command ${memberId match {
+          case Some(id) => id
+          case _        => "all"
+        }}"
 
       override def forConference(
           conferenceId: String,
