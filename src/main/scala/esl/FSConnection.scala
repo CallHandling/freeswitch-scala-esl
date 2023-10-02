@@ -26,22 +26,17 @@ import esl.FSConnection.{FSData, _}
 import esl.domain.CallCommands._
 import esl.domain.EventNames.{EventName, events}
 import esl.domain.HangupCauses.HangupCause
-import esl.domain.{ApplicationCommandConfig, FSMessage, _}
+import esl.domain.{CommandResponse, _}
 import esl.parser.{DefaultParser, Parser}
 
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
-import scala.concurrent.{
-  Await,
-  ExecutionContextExecutor,
-  Future,
-  Promise,
-  TimeoutException
-}
+import scala.concurrent.{Await, ExecutionContextExecutor, Future, Promise, TimeoutException}
 import scala.util.{Failure, Success, Try}
 import java.util.UUID
 import akka.event.{LogMarker, MarkerLoggingAdapter}
 import com.typesafe.scalalogging.StrictLogging
+import esl.domain.CallCommands.ConferenceCommand.SendConferenceCommand
 import esl.domain.CallCommands.Dial.DialConfig
 
 abstract class FSConnection extends StrictLogging {
@@ -837,6 +832,16 @@ abstract class FSConnection extends StrictLogging {
     * @return EventMessage
     */
   private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
+    val conferenceAppSet = Set(
+      "add-member",
+      "del-member",
+      "mute-member",
+      "deaf-member",
+      "unmute-member",
+      "undeaf-member",
+      "kick-member"
+    )
+
     def completeAndRemoveFromMap(
       command: FSExecuteApp,
       executeComplete: Promise[EventMessage],
@@ -879,8 +884,7 @@ abstract class FSConnection extends StrictLogging {
     ) match {
       case (_, _, _, Some(EventNames.Custom))
         if eventMessage.conferenceName.isDefined &&
-          (eventMessage.action.contains("add-member") ||
-            eventMessage.action.contains("del-member")) =>
+          (eventMessage.action.isDefined && conferenceAppSet.contains(eventMessage.action.get)) =>
         adapter.info(
           logMarker,
           s"""Channel custom event ${eventMessage.action} for callId
@@ -904,7 +908,13 @@ abstract class FSConnection extends StrictLogging {
                 ) && eventMessage.action.contains("add-member") => true
             case (_, CommandToQueue(command: LeaveConference, _, _)) if eventMessage.conferenceName.contains(
               command.conferenceId
-            ) && eventMessage.action.contains("del-member") => true
+            ) && eventMessage.action.contains("kick-member") => true
+            case (_, CommandToQueue(command: ConferenceCommand, _, _)) if eventMessage.conferenceName.contains(
+            command.conferenceId
+            ) && (command.command match {
+              case SendConferenceCommand(_, cmd, _) if eventMessage.action.fold(false)(_.startsWith(cmd)) => true
+              case _ => false
+            }) => true
             case _ => false
           }
         findResult match {
@@ -1053,11 +1063,11 @@ abstract class FSConnection extends StrictLogging {
          */
         jobId match {
           case Some(job)
-              if (eventMessage.jobCommand.fold(false)(
+              if ((eventMessage.jobCommand.fold(false)(
                 _ == "uuid_hold"
               ) && eventMessage.jobCommandArg.fold(false)(
                 _.startsWith("off")
-              )) =>
+              )) || eventMessage.jobCommand.fold(false)(_ == "conference")) =>
             job.executeEvent.complete(Success(eventMessage))
             if (job.executeComplete.isCompleted) {
               eventMap.remove(job.command.eventUuid)
