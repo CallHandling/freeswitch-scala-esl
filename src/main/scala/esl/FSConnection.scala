@@ -839,6 +839,8 @@ abstract class FSConnection extends StrictLogging {
       "deaf-member",
       "unmute-member",
       "undeaf-member",
+      "hold-member",
+      "unhold-member",
       "kick-member"
     )
 
