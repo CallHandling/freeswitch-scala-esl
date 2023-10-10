@@ -232,7 +232,7 @@ object CallCommands {
       config: ApplicationCommandConfig
   ) extends FSCommand {
     override def toString: String =
-      s"""bgapi conference kick member $conferenceId ${memberId.getOrElse("all")}
+      s"""bgapi conference $conferenceId kick ${memberId.getOrElse("all")}
          |Job-UUID: $eventUuid$MESSAGE_TERMINATOR""".stripMargin
   }
 
