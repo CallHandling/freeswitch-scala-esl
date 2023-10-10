@@ -35,6 +35,7 @@ object HeaderNames {
   val otherLegUniqueId = "Other-Leg-Unique-ID"
   val channelCallUniqueId = "Channel-Call-UUID"
   val jobUUID = "Job-UUID"
+  val eavesdropTarget = "Media-Bug-Target"
   val jobCommand = "Job-Command"
   val jobCommandArg = "Job-Command-Arg"
   val originalChannelCallState = "Original-Channel-Call-State"

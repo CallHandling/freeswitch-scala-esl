@@ -142,6 +142,7 @@ class InboundServer(
     * @return Future[(UpSourceCompletionFuture, DownStreamCompletionFuture)]
     */
   def connect[Mat](
+      callId: String,
       password: String,
       onSendCommand: Option[
         (
@@ -163,7 +164,6 @@ class InboundServer(
       ) => Sink[FSData, Mat]
   ): Future[(Future[Done], Future[Mat])] = {
     val fsConnection = InboundFSConnection(enableDebugLogs)
-    val callId = UUID.randomUUID().toString.replace("-", "")
     onFsMsg.foreach(fn => fsConnection.onReceiveMsg(fn(callId, fsConnection)))
     onSendCommand.foreach(fn =>
       fsConnection.onSendCommand(fn(callId, fsConnection))

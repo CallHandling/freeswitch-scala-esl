@@ -322,20 +322,30 @@ object CallCommands {
       bargeIn: Boolean,
       options: DialConfig,
       listenCallId: String
-  ) extends FSCommand {
-    override def toString: String = {
-      if (bargeIn) {
-        s"""bgapi ${options.asOriginateCmd} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
-           |Job-UUID: $eventUuid
-           |
-           |""".stripMargin
-      } else {
-        s"""bgapi ${options.asOriginateCmd} &eavesdrop($listenCallId)
-           |Job-UUID: $eventUuid
-           |
-           |""".stripMargin
+  ) extends FSExecuteApp {
+
+    override val application: String = "set"
+    override lazy val args: String = {
+      val apiCall = {
+        if (bargeIn) {
+          s"""bgapi ${options.asOriginateCmd} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
+             |
+             |""".stripMargin
+        } else {
+          s"""bgapi ${options.asOriginateCmd} &eavesdrop($listenCallId)
+             |Job-UUID: $eventUuid
+             |
+             |""".stripMargin
+        }
       }
+
+      s"""listen_$eventUuid=$${
+         |$apiCall
+         |}
+         |
+         |""".stripMargin
     }
+
   }
 
   final case class Dial(
@@ -344,6 +354,13 @@ object CallCommands {
   ) extends FSExecuteApp {
 
     override val application: String = "set"
+
+    /*override def toString: String =
+      s"""bgapi ${options.asOriginateCmd} &park()
+         |Job-UUID: $eventUuid
+         |
+         |""".stripMargin*/
+
     override lazy val args: String = {
 
       s"""dial_$eventUuid=$${
@@ -355,6 +372,21 @@ object CallCommands {
          |
          |""".stripMargin
     }
+  }
+
+
+  final case class DialSession(
+                         options: DialConfig,
+                         config: ApplicationCommandConfig
+                       ) extends FSCommand {
+
+
+    override def toString: String =
+      s"""bgapi ${options.asOriginateCmd} &park()
+         |Job-UUID: $eventUuid
+         |
+         |""".stripMargin
+
   }
 
   object Dial {
@@ -369,7 +401,7 @@ object CallCommands {
     ) {
       def asOriginateCmd = {
         val vars = Seq(
-          "ignore_early_media=false",
+          "ignore_early_media=true",
           s"originate_timeout=${timeout.toSeconds}",
           s"origination_uuid=$uniqueId",
           "dtmf_type=rfc2833"
@@ -457,6 +489,8 @@ object CallCommands {
 
   final case class CreateUUID(config: ApplicationCommandConfig)
       extends FSCommand {
+
+    override val eventUuid: String = java.util.UUID.randomUUID.toString.replace("-","")
     override def toString: String =
       s"bgapi create_uuid $eventUuid${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }

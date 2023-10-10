@@ -474,8 +474,8 @@ abstract class FSConnection extends StrictLogging {
             .copy(fsMessages = messagesWithSameId) -> messagesWithDifferentId
         }
 
-        fSData => {
-
+        _fSData => {
+          val fSData = _fSData.copy(fsMessages = _fSData.fsMessages.reverse)
           val updatedFSData = {
 
             lazy val (authRequest, allMsgsOtherThanAuthRequest) =
@@ -871,6 +871,50 @@ abstract class FSConnection extends StrictLogging {
             )
           }
         }
+      case (
+            Some(appId),
+            Some(
+              CommandToQueue(command: ListenIn, executeEvent, executeComplete)
+            ),
+            _,
+            Some(EventNames.ChannelExecute)
+          ) if appId == command.eventUuid => {
+        executeEvent.complete(Success(eventMessage))
+        if (executeComplete.isCompleted) eventMap.remove(appId)
+      }
+      case (
+            _,
+            _,
+            _,
+            Some(EventNames.ChannelPark)
+          ) => {
+
+        eventMap.collectFirst({
+          case (_, CommandToQueue(command: Dial, executeEvent, executeComplete))
+              if eventMessage.uuid
+                .fold(false)(_ == command.config.channelUuid) => {
+            executeComplete.complete(Success(eventMessage))
+            if (executeEvent.isCompleted) {
+              eventMap.remove(command.eventUuid)
+            }
+          }
+          case (
+                _,
+                CommandToQueue(
+                  command: DialSession,
+                  executeEvent,
+                  executeComplete
+                )
+              )
+              if eventMessage.uuid
+                .fold(false)(_ == command.config.channelUuid) => {
+            executeComplete.complete(Success(eventMessage))
+            if (executeEvent.isCompleted) {
+              eventMap.remove(command.eventUuid)
+            }
+          }
+        })
+      }
       case (_, Some(commandToQueue), _, Some(EventNames.ChannelExecute))
           if !eventMessage.answerState.contains(AnswerStates.Early) =>
         commandToQueue.executeEvent.complete(Success(eventMessage))
@@ -902,6 +946,20 @@ abstract class FSConnection extends StrictLogging {
             })
             .mkString("\n")}""".stripMargin
         )
+      case (
+            Some(appId),
+            Some(CommandToQueue(command: Dial, _, _)),
+            _,
+            Some(EventNames.ChannelExecuteComplete)
+          ) =>
+      //skip for dial command
+      case (
+            Some(appId),
+            Some(CommandToQueue(command: DialSession, _, _)),
+            _,
+            Some(EventNames.ChannelExecuteComplete)
+          ) =>
+      //skip for dial command
       case (Some(appId), _, _, _) =>
         adapter.warning(
           logMarker,
@@ -929,8 +987,12 @@ abstract class FSConnection extends StrictLogging {
               executeEvent.complete(Success(eventMessage))
           }
         }
-      case (_, _, _, Some(EventNames.BackgroundJob))
-          if eventMap.contains(eventMessage.jobUuid.getOrElse("")) =>
+      case (
+            _,
+            Some(commandToQueue: CommandToQueue),
+            _,
+            Some(EventNames.BackgroundJob)
+          ) if eventMap.contains(eventMessage.jobUuid.getOrElse("")) =>
         val jobId = eventMap.get(eventMessage.jobUuid.getOrElse(""))
 
         /*>> TYPE
@@ -989,7 +1051,8 @@ abstract class FSConnection extends StrictLogging {
                   .mkString("\n")}""".stripMargin
               )
             }
-
+          case Some(job) if commandToQueue.command.isInstanceOf[Dial]        =>
+          case Some(job) if commandToQueue.command.isInstanceOf[DialSession] =>
           case Some(job) =>
             job.executeComplete.complete(Success(eventMessage))
             if (job.executeEvent.isCompleted)
@@ -1035,11 +1098,21 @@ abstract class FSConnection extends StrictLogging {
         )
         val findResult =
           eventMap.find { //TODO change eventMap key for this command
-            case (_, command) =>
-              command.command.isInstanceOf[Dial] &&
-                eventMessage.callerUniqueId.contains(
-                  command.command.asInstanceOf[Dial].options.uniqueId
-                )
+            case (
+                  _,
+                  CommandToQueue(command: Dial, executeEvent, executeComplete)
+                ) =>
+              eventMessage.callerUniqueId.contains(command.options.uniqueId)
+            case (
+                  _,
+                  CommandToQueue(
+                    command: DialSession,
+                    executeEvent,
+                    executeComplete
+                  )
+                ) =>
+              eventMessage.callerUniqueId.contains(command.options.uniqueId)
+            case _ => false
           }
         adapter.info(s"Command from map $findResult")
         findResult match {
@@ -1067,11 +1140,15 @@ abstract class FSConnection extends StrictLogging {
         )
         val findResult =
           eventMap.find { //TODO change eventMap key for this command
-            case (_, command) =>
-              command.command.isInstanceOf[Dial] &&
-                eventMessage.callerUniqueId.contains(
-                  command.command.asInstanceOf[Dial].options.uniqueId
-                )
+            case (_, CommandToQueue(command: Dial, _, _)) =>
+              eventMessage.callerUniqueId.contains(
+                command.options.uniqueId
+              )
+            case (_, CommandToQueue(command: DialSession, _, _)) =>
+              eventMessage.callerUniqueId.contains(
+                command.options.uniqueId
+              )
+            case _ => false
           }
         adapter.info(s"Command from map $findResult")
         findResult match {
@@ -1081,6 +1158,27 @@ abstract class FSConnection extends StrictLogging {
             if (command.executeEvent.isCompleted) eventMap.remove(key)
           case _ =>
         }
+
+      case (_, _, _, Some(EventNames.MediaBugStart)) => {
+        eventMap
+          .collectFirst({
+            case (
+                  key,
+                  CommandToQueue(
+                    command: ListenIn,
+                    executeEvent,
+                    executeComplete
+                  )
+                )
+                if eventMessage.eavesdropTarget
+                  .fold(false)(_ == command.listenCallId) =>
+              executeComplete.complete(Success(eventMessage))
+              if (executeEvent.isCompleted) Some(key)
+              else Option.empty[String]
+          })
+          .flatten
+          .foreach(eventMap.remove)
+      }
       case _ =>
         adapter.debug(
           logMarker,

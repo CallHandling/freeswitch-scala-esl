@@ -184,5 +184,7 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
   def getVariable(variable: String): Option[String] =
     getHeader(s"variable_$variable")
 
+  lazy val eavesdropTarget: Option[String] = headers.get(HeaderNames.eavesdropTarget)
+
   //ToDO implement toString for debugging
 }
