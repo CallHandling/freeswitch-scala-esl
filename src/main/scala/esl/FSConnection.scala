@@ -1035,13 +1035,14 @@ abstract class FSConnection extends StrictLogging {
           }
         }
 
-      case (_, _, _, Some(EventNames.ChannelBridge)) =>
-        if (eventMessage.headers.get("Caller-Transfer-Source").fold(false)(_.contains("uuid_br"))) {
+      case (_, _, _, Some(EventNames.Api)) =>
+        if (
+          eventMessage.apiCommand.contains(
+            "uuid_bridge"
+          ) && eventMessage.headers.contains("API-Command-Argument")
+        ) {
 
-          val targets = Seq(
-            eventMessage.headers.getOrElse("Bridge-A-Unique-ID", ""),
-            eventMessage.headers.getOrElse("Bridge-B-Unique-ID", "")
-          ).filterNot(_.isBlank)
+          val targets = eventMessage.headers.getOrElse("API-Command-Argument", "").split("%20")
 
           val queuedCommand =
             eventMap.values.find {
@@ -1049,7 +1050,7 @@ abstract class FSConnection extends StrictLogging {
             }
           queuedCommand.map {
             case CommandToQueue(command: BridgeUuid, executeEvent, executeComplete) =>
-              completeAndRemoveFromMap(command, executeComplete, executeEvent.isCompleted)
+              completeAndRemoveFromMap(command, executeEvent, executeComplete.isCompleted)
           }
         }
       case (_, _, _, Some(EventNames.BackgroundJob))
@@ -1112,41 +1113,6 @@ abstract class FSConnection extends StrictLogging {
                   .mkString("\n")}""".stripMargin
               )
             }
-
-          case Some(job)
-            if (eventMessage.jobCommand.fold(false)(
-              _ == "uuid_bridge"
-            )) =>
-            if (!job.executeEvent.isCompleted)
-              job.executeEvent.complete(Success(eventMessage))
-            if (job.executeComplete.isCompleted) {
-              eventMap.remove(job.command.eventUuid)
-              adapter.info(
-                logMarker,
-                s"""handleFSEventMessage for background job id $jobId Removing entry
-                   |>> TYPE
-                   |EVENT ${eventMessage.eventName.getOrElse("NA")}
-                   |>> HEADERS
-                   |${
-                  eventMessage.headers
-                    .map(h => h._1 + " : " + h._2)
-                    .mkString(space, "\n" + space, "")
-                }
-                   |>> BODY
-                   |${eventMessage.body}
-                   |>> MAP is below
-                   |${
-                  eventMap
-                    .map({ item =>
-                      s"""appId: ${item._1}
-                         |command
-                         |${item._2.command}""".stripMargin
-                    })
-                    .mkString("\n")
-                }""".stripMargin
-              )
-            }
-
 
           case Some(job) =>
             job.executeComplete.complete(Success(eventMessage))
