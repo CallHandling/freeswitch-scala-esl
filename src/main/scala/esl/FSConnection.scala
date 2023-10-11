@@ -845,7 +845,7 @@ abstract class FSConnection extends StrictLogging {
     )
 
     def completeAndRemoveFromMap(
-      command: FSExecuteApp,
+      command: FSCommand,
       executeComplete: Promise[EventMessage],
       canRemove: Boolean
     ): Unit = {
@@ -1032,6 +1032,25 @@ abstract class FSConnection extends StrictLogging {
           queuedCommand.map {
             case CommandToQueue(_: CreateUUID, executeEvent, _) =>
               executeEvent.complete(Success(eventMessage))
+          }
+        }
+
+      case (_, _, _, Some(EventNames.Api)) =>
+        if (
+          eventMessage.apiCommand.contains(
+            "uuid_bridge"
+          ) && eventMessage.headers.contains("API-Command-Argument")
+        ) {
+
+          val targets = eventMessage.headers.getOrElse("API-Command-Argument", "").split("%20")
+
+          val queuedCommand =
+            eventMap.values.find {
+              case CommandToQueue(command: BridgeUuid, _, _) => command.targets.zip(targets).forall(tuple => tuple._1 == tuple._2)
+            }
+          queuedCommand.map {
+            case CommandToQueue(command: BridgeUuid, executeEvent, executeComplete) =>
+              completeAndRemoveFromMap(command, executeEvent, executeComplete.isCompleted)
           }
         }
       case (_, _, _, Some(EventNames.BackgroundJob))
