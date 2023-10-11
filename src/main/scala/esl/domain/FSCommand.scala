@@ -220,7 +220,7 @@ object CallCommands {
                            config: ApplicationCommandConfig
                          ) extends FSCommand {
     override def toString: String =
-      s"""bgapi uuid_bridge ${targets.mkString(" ")}"
+      s"""bgapi uuid_bridge ${targets.mkString(" ")}
          |Job-UUID: $eventUuid$MESSAGE_TERMINATOR""".stripMargin
   }
 
