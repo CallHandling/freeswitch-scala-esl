@@ -929,7 +929,7 @@ abstract class FSConnection extends StrictLogging {
         }
 
 
-      case (_, _, _, Some(EventNames.ChannelUnhold)) =>
+      case (_, _, uuid, Some(EventNames.ChannelUnhold)) =>
         for {
           channelId <- uuid
           command <-
@@ -957,6 +957,7 @@ abstract class FSConnection extends StrictLogging {
             )
           }
         }
+      /*
       case (
             Some(appId),
             Some(
@@ -1001,6 +1002,7 @@ abstract class FSConnection extends StrictLogging {
           }
         })
       }
+      */
       case (_, Some(commandToQueue), _, Some(EventNames.ChannelExecute))
           if !eventMessage.answerState.contains(AnswerStates.Early) &&
             !eventMessage.applicationName.contains("set") =>
@@ -1039,7 +1041,20 @@ abstract class FSConnection extends StrictLogging {
             })
             .mkString("\n")}""".stripMargin
         )
-        ???
+      case (
+            Some(appId),
+            Some(CommandToQueue(command: Dial, _, _)),
+            _,
+            Some(EventNames.ChannelExecute)
+          ) =>
+      //skip for dial command
+      case (
+            Some(appId),
+            Some(CommandToQueue(command: DialSession, _, _)),
+            _,
+            Some(EventNames.ChannelExecute)
+          ) =>
+      //skip for dial commands
       case (
             Some(appId),
             Some(CommandToQueue(command: Dial, _, _)),
@@ -1053,7 +1068,7 @@ abstract class FSConnection extends StrictLogging {
             _,
             Some(EventNames.ChannelExecuteComplete)
           ) =>
-      //skip for dial command
+      //skip for dial commands
       case (
             Some(appId),
             Some(CommandToQueue(command: Record, execute, executeComplete)),
