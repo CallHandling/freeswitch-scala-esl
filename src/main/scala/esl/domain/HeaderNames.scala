@@ -18,6 +18,7 @@ package esl.domain
 
 object HeaderNames {
   val contentLength = "Content-Length"
+  val CallDirection = "Call-Direction"
   val contentType = "Content-Type"
   val callerUniqueId = "Caller-Unique-ID"
   val application = "Application"

@@ -132,6 +132,8 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
 
   override val contentType: String = basicMessage.contentType
 
+  lazy val callDirection: Option[String] = getHeader(HeaderNames.CallDirection)
+
   val uuid: Option[String] = headers.get(HeaderNames.uniqueId)
   val otherLegUUID: Option[String] = headers.get(HeaderNames.otherLegUniqueId)
   val channelCallUUID: Option[String] =
@@ -155,20 +157,23 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
     headers
       .get(HeaderNames.answerState)
       .fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
-
+  lazy val answerStateRaw: Option[String] = headers.get(HeaderNames.answerState)
   val hangupCause: Option[HangupCauses.HangupCause] =
     headers
       .get(HeaderNames.hangupCause)
       .fold(Option.empty[HangupCauses.HangupCause])(HangupCauses.causes.lift)
 
-  val applicationUuid: Option[String] = headers.get(HeaderNames.applicationUuid).flatMap({
-    case x if x.trim.isEmpty  => None
-    case x => Some(x.trim)
-  })
+  val applicationUuid: Option[String] = headers
+    .get(HeaderNames.applicationUuid)
+    .flatMap({
+      case x if x.trim.isEmpty => None
+      case x                   => Some(x.trim)
+    })
 
   lazy val jobUuid: Option[String] = headers.get(HeaderNames.jobUUID)
   lazy val jobCommand: Option[String] = headers.get(HeaderNames.jobCommand)
-  lazy val jobCommandArg: Option[String] = headers.get(HeaderNames.jobCommandArg)
+  lazy val jobCommandArg: Option[String] =
+    headers.get(HeaderNames.jobCommandArg)
 
   val callerUniqueId: Option[String] = headers.get(HeaderNames.callerUniqueId)
 
@@ -184,7 +189,8 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
   def getVariable(variable: String): Option[String] =
     getHeader(s"variable_$variable")
 
-  lazy val eavesdropTarget: Option[String] = headers.get(HeaderNames.eavesdropTarget)
+  lazy val eavesdropTarget: Option[String] =
+    headers.get(HeaderNames.eavesdropTarget)
 
   //ToDO implement toString for debugging
 }

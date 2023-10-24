@@ -907,7 +907,7 @@ abstract class FSConnection extends StrictLogging {
                 )
               )
               if eventMessage.uuid
-                .fold(false)(_ == command.config.channelUuid) => {
+                .fold(false)(_ == command.options.uniqueId) => {
             executeComplete.complete(Success(eventMessage))
             if (executeEvent.isCompleted) {
               eventMap.remove(command.eventUuid)
@@ -1122,8 +1122,7 @@ abstract class FSConnection extends StrictLogging {
             if (command.executeComplete.isCompleted) eventMap.remove(key)
           case _ =>
         }
-      case (_, _, _, Some(EventNames.ChannelCallState))
-          if !eventMessage.answerState.contains(AnswerStates.Ringing) =>
+      case (_, _, _, Some(EventNames.ChannelCallState)) =>
         adapter.info(
           logMarker,
           s"""Channel call state event for callId
@@ -1138,26 +1137,32 @@ abstract class FSConnection extends StrictLogging {
             })
             .mkString("\n")}""".stripMargin
         )
-        val findResult =
-          eventMap.find { //TODO change eventMap key for this command
+
+        (for {
+          (key, command) <- eventMap.find {
             case (_, CommandToQueue(command: Dial, _, _)) =>
-              eventMessage.callerUniqueId.contains(
-                command.options.uniqueId
-              )
+              eventMessage.callerUniqueId.contains(command.options.uniqueId)
             case (_, CommandToQueue(command: DialSession, _, _)) =>
-              eventMessage.callerUniqueId.contains(
-                command.options.uniqueId
-              )
+              eventMessage.callerUniqueId.contains(command.options.uniqueId)
             case _ => false
+          }.toList
+          promise <- eventMessage.headers.get("Channel-Call-State") match {
+            case Some("HANGUP" | "ACTIVE") =>
+              command.executeEvent :: command.executeComplete :: Nil
+            case _ => command.executeEvent :: Nil
           }
-        adapter.info(s"Command from map $findResult")
-        findResult match {
-          case Some((key, command)) =>
-            if (!command.executeComplete.isCompleted)
-              command.executeComplete.complete(Success(eventMessage))
-            if (command.executeEvent.isCompleted) eventMap.remove(key)
-          case _ =>
-        }
+        } yield {
+          if (!promise.isCompleted) {
+            promise.complete(Success(eventMessage))
+          }
+          (key, command)
+        }).headOption.foreach({
+          case (key, command) => {
+            if (
+              command.executeComplete.isCompleted && command.executeComplete.isCompleted
+            ) eventMap.remove(key)
+          }
+        })
 
       case (_, _, _, Some(EventNames.MediaBugStart)) => {
         eventMap
@@ -1410,11 +1415,10 @@ abstract class FSConnection extends StrictLogging {
     * @return Future[CommandResponse]
     */
   def filterUUId(
-      uuid: String,
-      config: ApplicationCommandConfig = ApplicationCommandConfig()
+      uuid: String
   ): Future[CommandResponse] = {
     setOriginatedCallIds(uuid)
-    publishCommand(FilterUUId(uuid, config))
+    publishCommand(FilterUUId(uuid))
   }
   def createUUID(
       config: ApplicationCommandConfig = ApplicationCommandConfig()

@@ -329,6 +329,7 @@ object CallCommands {
       val apiCall = {
         if (bargeIn) {
           s"""bgapi ${options.asOriginateCmd} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
+             |Job-UUID: $eventUuid
              |
              |""".stripMargin
         } else {
@@ -374,12 +375,7 @@ object CallCommands {
     }
   }
 
-
-  final case class DialSession(
-                         options: DialConfig,
-                         config: ApplicationCommandConfig
-                       ) extends FSCommand {
-
+  final case class DialSession(options: DialConfig) extends FSCommand {
 
     override def toString: String =
       s"""bgapi ${options.asOriginateCmd} &park()
@@ -401,7 +397,7 @@ object CallCommands {
     ) {
       def asOriginateCmd = {
         val vars = Seq(
-          "ignore_early_media=true",
+          "ignore_early_media=false",
           s"originate_timeout=${timeout.toSeconds}",
           s"origination_uuid=$uniqueId",
           "dtmf_type=rfc2833"
@@ -490,7 +486,8 @@ object CallCommands {
   final case class CreateUUID(config: ApplicationCommandConfig)
       extends FSCommand {
 
-    override val eventUuid: String = java.util.UUID.randomUUID.toString.replace("-","")
+    override val eventUuid: String =
+      java.util.UUID.randomUUID.toString.replace("-", "")
     override def toString: String =
       s"bgapi create_uuid $eventUuid${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }
@@ -519,9 +516,8 @@ object CallCommands {
     * filter <Unique-ID> <uuid>
     *
     * @param uuid : Channel uuid to filter in
-    * @param config : ApplicationCommandConfig
     */
-  final case class FilterUUId(uuid: String, config: ApplicationCommandConfig)
+  final case class FilterUUId(uuid: String)
       extends FSCommand {
     override def toString: String =
       s"filter Unique-ID ${uuid}$MESSAGE_TERMINATOR"
