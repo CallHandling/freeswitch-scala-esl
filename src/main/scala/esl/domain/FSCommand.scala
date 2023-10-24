@@ -348,11 +348,8 @@ object CallCommands {
       bargeIn: Boolean,
       options: DialConfig,
       listenCallId: String
-  ) extends FSExecuteApp {
-
-    override val application: String = "set"
-    override lazy val args: String = {
-      val apiCall = {
+  ) extends FSCommand {
+    override def toString: String = {
         if (bargeIn) {
           s"""bgapi ${options.asOriginateCmd} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
              |Job-UUID: $eventUuid
@@ -365,14 +362,6 @@ object CallCommands {
              |""".stripMargin
         }
       }
-
-      s"""listen_$eventUuid=$${
-         |$apiCall
-         |}
-         |
-         |""".stripMargin
-    }
-
   }
 
   final case class Dial(
