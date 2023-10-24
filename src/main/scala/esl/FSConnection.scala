@@ -1003,6 +1003,35 @@ abstract class FSConnection extends StrictLogging {
         })
       }
       */
+      case (
+        _,
+        Some(CommandToQueue(command: Dial, _, _)),
+        _,
+        Some(EventNames.ChannelExecute)
+        ) =>
+      //skip for dial command
+      case (
+        _,
+        Some(CommandToQueue(command: DialSession, _, _)),
+        _,
+        Some(EventNames.ChannelExecute)
+        ) =>
+      //skip for dial commands
+      case (
+        _,
+        Some(CommandToQueue(command: Dial, _, _)),
+        _,
+        Some(EventNames.ChannelExecuteComplete)
+        ) =>
+      //skip for dial command
+      case (
+        _,
+        Some(CommandToQueue(command: DialSession, _, _)),
+        _,
+        Some(EventNames.ChannelExecuteComplete)
+        ) =>
+      //skip for dial commands
+
       case (_, Some(commandToQueue), _, Some(EventNames.ChannelExecute))
           if !eventMessage.answerState.contains(AnswerStates.Early) &&
             !eventMessage.applicationName.contains("set") =>
@@ -1041,34 +1070,6 @@ abstract class FSConnection extends StrictLogging {
             })
             .mkString("\n")}""".stripMargin
         )
-      case (
-            Some(appId),
-            Some(CommandToQueue(command: Dial, _, _)),
-            _,
-            Some(EventNames.ChannelExecute)
-          ) =>
-      //skip for dial command
-      case (
-            Some(appId),
-            Some(CommandToQueue(command: DialSession, _, _)),
-            _,
-            Some(EventNames.ChannelExecute)
-          ) =>
-      //skip for dial commands
-      case (
-            Some(appId),
-            Some(CommandToQueue(command: Dial, _, _)),
-            _,
-            Some(EventNames.ChannelExecuteComplete)
-          ) =>
-      //skip for dial command
-      case (
-            Some(appId),
-            Some(CommandToQueue(command: DialSession, _, _)),
-            _,
-            Some(EventNames.ChannelExecuteComplete)
-          ) =>
-      //skip for dial commands
       case (
             Some(appId),
             Some(CommandToQueue(command: Record, execute, executeComplete)),
@@ -1145,11 +1146,11 @@ abstract class FSConnection extends StrictLogging {
          */
         jobId match {
           case Some(job)
-              if ((eventMessage.jobCommand.fold(false)(
+              if (eventMessage.jobCommand.fold(false)(
                 _ == "uuid_hold"
               ) && eventMessage.jobCommandArg.fold(false)(
                 _.startsWith("off")
-              )) || eventMessage.jobCommand.fold(false)(_ == "conference")) =>
+              )) || eventMessage.jobCommand.fold(false)(_ == "conference") =>
             job.executeEvent.complete(Success(eventMessage))
             if (job.executeComplete.isCompleted) {
               eventMap.remove(job.command.eventUuid)
@@ -1786,7 +1787,6 @@ abstract class FSConnection extends StrictLogging {
   /**
     * Send DTMF digits from the session using the method(s) configured on the endpoint in use
     * If no duration is specified the default DTMF length of 2000ms will be used.
-    *ю
     * @param dtmfDigits   : String DTMF digits
     * @param toneDuration : Option[Duration] default is empty
     * @param config       : ApplicationCommandConfig
