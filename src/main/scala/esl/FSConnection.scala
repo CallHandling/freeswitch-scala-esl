@@ -26,22 +26,17 @@ import esl.FSConnection.{FSData, _}
 import esl.domain.CallCommands._
 import esl.domain.EventNames.{EventName, events}
 import esl.domain.HangupCauses.HangupCause
-import esl.domain.{ApplicationCommandConfig, FSMessage, _}
+import esl.domain.{CommandResponse, _}
 import esl.parser.{DefaultParser, Parser}
 
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
-import scala.concurrent.{
-  Await,
-  ExecutionContextExecutor,
-  Future,
-  Promise,
-  TimeoutException
-}
+import scala.concurrent.{Await, ExecutionContextExecutor, Future, Promise, TimeoutException}
 import scala.util.{Failure, Success, Try}
 import java.util.UUID
 import akka.event.{LogMarker, MarkerLoggingAdapter}
 import com.typesafe.scalalogging.StrictLogging
+import esl.domain.CallCommands.ConferenceCommand.SendConferenceCommand
 import esl.domain.CallCommands.Dial.DialConfig
 
 abstract class FSConnection extends StrictLogging {
@@ -837,15 +832,106 @@ abstract class FSConnection extends StrictLogging {
     * @return EventMessage
     */
   private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
+
+    lazy val conferenceAppSet = Set(
+      "add-member",
+      "del-member",
+      "mute-member",
+      "deaf-member",
+      "unmute-member",
+      "undeaf-member",
+      "hold-member",
+      "unhold-member",
+      "kick-member"
+    )
+
+    def completeAndRemoveFromMap(
+      command: FSExecuteApp,
+      executeComplete: Promise[EventMessage],
+      canRemove: Boolean
+    ): Unit = {
+      executeComplete.complete(Success(eventMessage))
+      if (canRemove) {
+        eventMap.remove(command.eventUuid)
+        adapter.info(
+          logMarker,
+          s"""handleFSEventMessage for app id ${command.eventUuid} Removing entry
+             |>> TYPE
+             |EVENT ${eventMessage.eventName.getOrElse("NA")}
+             |>> HEADERS
+             |${
+            eventMessage.headers
+              .map(h => h._1 + " : " + h._2)
+              .mkString(space, "\n" + space, "")
+          }
+             |>> BODY
+             |${eventMessage.body}
+             |>> MAP is below
+             |${
+            eventMap.map({ case (key, value) =>
+                s"""appId: $key
+                   |command
+                   |$value""".stripMargin
+              })
+              .mkString("\n")
+          }""".stripMargin
+        )
+      }
+    }
+
     (
       eventMessage.applicationUuid,
       eventMessage.applicationUuid.flatMap(eventMap.get),
       eventMessage.uuid,
       eventMessage.eventName
     ) match {
+      case (_, _, _, Some(EventNames.Custom))
+        if eventMessage.conferenceName.isDefined &&
+          (eventMessage.action.isDefined && conferenceAppSet.contains(eventMessage.action.get)) =>
+        adapter.info(
+          logMarker,
+          s"""Channel custom event ${eventMessage.action} for callId
+             |${eventMessage.headers.get("Unique-ID")}
+             |>> MAP command is below
+             |${
+            eventMap
+              .map({ item =>
+                s"""appId: ${item._1}
+                   |command
+                   |${item._2.command}
+                   |command type ${item._2.command.getClass}""".stripMargin
+              })
+              .mkString("\n")
+          }""".stripMargin
+        )
+        val findResult =
+          eventMap.find { //TODO change eventMap key for this command
+            case (_, CommandToQueue(command: AddToConference, _, _)) if eventMessage.conferenceName.contains(
+              command.conferenceId
+            ) && eventMessage.action.contains("add-member") => true
+            case (_, CommandToQueue(command: LeaveConference, _, _)) if eventMessage.conferenceName.contains(
+              command.conferenceId
+            ) && eventMessage.action.contains("kick-member") => true
+            case (_, CommandToQueue(command: ConferenceCommand, _, _)) if eventMessage.conferenceName.contains(
+              command.conferenceId
+            ) && (command.command match {
+              case SendConferenceCommand(_, cmd, _) if eventMessage.action.fold(false)(_.startsWith(cmd)) => true
+              case _ => false
+            }) => true
+            case _ => false
+          }
+        findResult match {
+          case Some((key, command)) =>
+            if (!command.executeComplete.isCompleted)
+              command.executeComplete.complete(Success(eventMessage))
+            if (command.executeEvent.isCompleted) eventMap.remove(key)
+          case _ =>
+        }
+
+
       case (_, _, _, Some(EventNames.ChannelUnhold)) =>
         for {
-          channelId <- eventMessage.uuid
+          channelId <- uuid
           command <-
             eventMap.collectFirst { //TODO change eventMap key for this command
               case (_, queCommand @ CommandToQueue(command: OffHold, _, _))
@@ -916,16 +1002,23 @@ abstract class FSConnection extends StrictLogging {
         })
       }
       case (_, Some(commandToQueue), _, Some(EventNames.ChannelExecute))
-          if !eventMessage.answerState.contains(AnswerStates.Early) =>
-        commandToQueue.executeEvent.complete(Success(eventMessage))
+          if !eventMessage.answerState.contains(AnswerStates.Early) &&
+            !eventMessage.applicationName.contains("set") =>
+        if (!commandToQueue.executeEvent.isCompleted)
+          commandToQueue.executeEvent.complete(Success(eventMessage))
+        if (commandToQueue.executeComplete.isCompleted)
+          eventMap.remove(commandToQueue.command.eventUuid)
       case (
             Some(appId),
             Some(commandToQueue),
             _,
             Some(EventNames.ChannelExecuteComplete)
-          ) if !eventMessage.answerState.contains(AnswerStates.Early) =>
-        commandToQueue.executeComplete.complete(Success(eventMessage))
-        eventMap.remove(commandToQueue.command.eventUuid)
+          ) if !eventMessage.answerState.contains(AnswerStates.Early) &&
+        !eventMessage.applicationName.contains("set") =>
+        if (!commandToQueue.executeComplete.isCompleted)
+          commandToQueue.executeComplete.complete(Success(eventMessage))
+        if (commandToQueue.executeEvent.isCompleted)
+          eventMap.remove(commandToQueue.command.eventUuid)
         adapter.info(
           logMarker,
           s"""handleFSEventMessage for app id $appId Removing entry
@@ -946,6 +1039,7 @@ abstract class FSConnection extends StrictLogging {
             })
             .mkString("\n")}""".stripMargin
         )
+        ???
       case (
             Some(appId),
             Some(CommandToQueue(command: Dial, _, _)),
@@ -960,12 +1054,26 @@ abstract class FSConnection extends StrictLogging {
             Some(EventNames.ChannelExecuteComplete)
           ) =>
       //skip for dial command
+      case (
+            Some(appId),
+            Some(CommandToQueue(command: Record, execute, executeComplete)),
+            _,
+            Some(EventNames.ChannelExecuteComplete)
+          ) if appId == command.eventUuid =>
+        completeAndRemoveFromMap(command, executeComplete, execute.isCompleted)
+      case (
+            Some(appId),
+            Some(CommandToQueue(command: PlayFile, execute, executeComplete)),
+            _,
+            Some(EventNames.ChannelExecuteComplete)
+          ) if appId == command.eventUuid =>
+        completeAndRemoveFromMap(command, executeComplete, execute.isCompleted)
       case (Some(appId), _, _, _) =>
         adapter.warning(
           logMarker,
           s"""handleFSEventMessage for app id $appId Unable to handle Command (unexpected eventName header)
              |>> TYPE
-             |EVENT ${eventMessage.eventName.getOrElse("NA")}
+             |EVENT ${eventMessage.eventName.fold("NA")(_.name)}
              |>> HEADERS
              |${eventMessage.headers
             .map(h => h._1 + " : " + h._2)
@@ -1022,11 +1130,11 @@ abstract class FSConnection extends StrictLogging {
          */
         jobId match {
           case Some(job)
-              if (eventMessage.jobCommand.fold(false)(
+              if ((eventMessage.jobCommand.fold(false)(
                 _ == "uuid_hold"
               ) && eventMessage.jobCommandArg.fold(false)(
                 _.startsWith("off")
-              )) =>
+              )) || eventMessage.jobCommand.fold(false)(_ == "conference")) =>
             job.executeEvent.complete(Success(eventMessage))
             if (job.executeComplete.isCompleted) {
               eventMap.remove(job.command.eventUuid)
@@ -1137,7 +1245,6 @@ abstract class FSConnection extends StrictLogging {
             })
             .mkString("\n")}""".stripMargin
         )
-
         (for {
           (key, command) <- eventMap.find {
             case (_, CommandToQueue(command: Dial, _, _)) =>
@@ -1664,7 +1771,7 @@ abstract class FSConnection extends StrictLogging {
   /**
     * Send DTMF digits from the session using the method(s) configured on the endpoint in use
     * If no duration is specified the default DTMF length of 2000ms will be used.
-    *
+    *ю
     * @param dtmfDigits   : String DTMF digits
     * @param toneDuration : Option[Duration] default is empty
     * @param config       : ApplicationCommandConfig

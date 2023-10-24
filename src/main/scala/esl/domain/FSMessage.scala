@@ -16,6 +16,7 @@
 
 package esl.domain
 
+import esl.domain.HeaderNames.Conference
 import esl.util._
 
 import scala.language.postfixOps
@@ -143,10 +144,10 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
       .get(HeaderNames.eventName)
       .fold(Option.empty[EventNames.EventName])(EventNames.events.lift)
 
-  val channelState: Option[AnswerStates.AnswerState] =
+  val channelState: Option[ChannelStates.ChannelState] =
     headers
       .get(HeaderNames.channelState)
-      .fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
+      .fold(Option.empty[ChannelStates.ChannelState])(ChannelStates.states.lift)
 
   val channelCallState: Option[AnswerStates.AnswerState] =
     headers
@@ -170,6 +171,11 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
       case x                   => Some(x.trim)
     })
 
+  val applicationName: Option[String] = headers.get(HeaderNames.application).flatMap({
+    case x if x.trim.isEmpty => None
+    case x => Some(x.trim)
+  })
+
   lazy val jobUuid: Option[String] = headers.get(HeaderNames.jobUUID)
   lazy val jobCommand: Option[String] = headers.get(HeaderNames.jobCommand)
   lazy val jobCommandArg: Option[String] =
@@ -183,6 +189,9 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
       .fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
 
   val apiCommand: Option[String] = headers.get(HeaderNames.apiCommand)
+
+  lazy val action: Option[String] = headers.get(Conference.action)
+  lazy val conferenceName: Option[String] = headers.get(Conference.name)
 
   def getHeader(header: String): Option[String] = headers.get(header)
 

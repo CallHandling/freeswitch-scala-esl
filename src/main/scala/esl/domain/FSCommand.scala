@@ -228,25 +228,25 @@ object CallCommands {
 
   final case class LeaveConference(
       conferenceId: String,
+      memberId: Option[String],
       config: ApplicationCommandConfig
-  ) extends FSExecuteApp {
-    override val application: String = "conference"
-    override val args: String = s"hangup:$conferenceId"
+  ) extends FSCommand {
+    override def toString: String =
+      s"""bgapi conference kick member $conferenceId ${memberId.getOrElse("all")}
+         |Job-UUID: $eventUuid$MESSAGE_TERMINATOR""".stripMargin
   }
 
   final case class ConferenceCommand(
       conferenceId: String,
       command: ConferenceCommand.ConferenceCommandType,
       commandConfig: ApplicationCommandConfig
-  ) extends FSExecuteApp {
+  ) extends FSCommand {
 
     lazy val config: ApplicationCommandConfig =
-      commandConfig.copy(channelUuid = "")
+      commandConfig.copy(channelUuid = conferenceId)
 
-    override val application: String = "conference"
-
-    override val args: String = s"$conferenceId $command"
-
+    override def toString: String =
+      s"bgapi conference $conferenceId ${command.toString} ${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }
 
   object ConferenceCommand {
@@ -257,6 +257,7 @@ object CallCommands {
           config: ApplicationCommandConfig
       ): ConferenceCommand
     }
+
     final case class Play(
         file: String,
         nomux: Boolean = false,
@@ -284,6 +285,22 @@ object CallCommands {
     final case class PausePlay() extends ConferenceCommandType {
 
       override def toString: String = "pause_play"
+
+      override def forConference(
+          conferenceId: String,
+          config: ApplicationCommandConfig
+      ): ConferenceCommand = {
+        ConferenceCommand(conferenceId, this, config)
+      }
+    }
+
+    final case class SendConferenceCommand(memberId: Option[String], command: String, config: ApplicationCommandConfig)
+        extends ConferenceCommandType {
+      override def toString: String =
+        s"$command ${memberId match {
+          case Some(id) => id
+          case _        => "all"
+        }}"
 
       override def forConference(
           conferenceId: String,

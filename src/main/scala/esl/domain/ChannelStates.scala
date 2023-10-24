@@ -77,8 +77,12 @@ object ChannelStates {
     override val name: String = "CS_REPORTING"
   }
 
+  case object NoneState extends ChannelState {
+    override val name: String = "CS_NONE"
+  }
+
   val states: Map[String, ChannelState] = List(
     NewChannel, Init, Routing, SoftExecute, Execute, ExchangeMedia, Park, ConsumeMedia, Hibernate,
-    Reset, Hangup, Done, Destroy, Reporting)
+    Reset, Hangup, Done, Destroy, Reporting, NoneState)
     .map(state => state.name -> state).toMap
 }
