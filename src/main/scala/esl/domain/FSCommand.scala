@@ -215,6 +215,15 @@ object CallCommands {
     override val args: String = targets.mkString(dialType.separator)
   }
 
+  final case class BridgeUuid(
+                           targets: List[String],
+                           config: ApplicationCommandConfig
+                         ) extends FSCommand {
+    override def toString: String =
+      s"""bgapi uuid_bridge ${targets.mkString(" ")}
+         |Job-UUID: $eventUuid$MESSAGE_TERMINATOR""".stripMargin
+  }
+
   final case class AddToConference(
       conferenceId: String,
       profile: String,
@@ -232,7 +241,7 @@ object CallCommands {
       config: ApplicationCommandConfig
   ) extends FSCommand {
     override def toString: String =
-      s"""bgapi conference kick member $conferenceId ${memberId.getOrElse("all")}
+      s"""bgapi conference $conferenceId kick ${memberId.getOrElse("all")}
          |Job-UUID: $eventUuid$MESSAGE_TERMINATOR""".stripMargin
   }
 
