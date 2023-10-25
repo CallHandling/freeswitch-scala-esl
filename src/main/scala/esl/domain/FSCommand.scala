@@ -235,15 +235,15 @@ object CallCommands {
       s"$conferenceId@$profile${flags.mkString("+flags{", "|", "}")}"
   }
 
-  final case class LeaveConference(
-      conferenceId: String,
-      memberId: Option[String],
-      config: ApplicationCommandConfig
-  ) extends FSCommand {
-    override def toString: String =
-      s"""bgapi conference $conferenceId kick ${memberId.getOrElse("all")}
-         |Job-UUID: $eventUuid$MESSAGE_TERMINATOR""".stripMargin
-  }
+//  final case class LeaveConference(
+//      conferenceId: String,
+//      memberId: Option[String],
+//      config: ApplicationCommandConfig
+//  ) extends FSCommand {
+//    override def toString: String =
+//      s"""bgapi conference $conferenceId kick ${memberId.getOrElse("all")}
+//         |Job-UUID: $eventUuid$MESSAGE_TERMINATOR""".stripMargin
+//  }
 
   final case class ConferenceCommand(
       conferenceId: String,
