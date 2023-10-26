@@ -1288,7 +1288,7 @@ abstract class FSConnection extends StrictLogging {
               }""".stripMargin
             )
           }
-        } else {
+        } else if (eventMessage.jobCommand.fold(false)(_ != "originate")) {
           commandToQueue.executeComplete.complete(Success(eventMessage))
           if (commandToQueue.executeEvent.isCompleted)
             eventMap.remove(commandToQueue.command.eventUuid)
