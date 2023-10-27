@@ -955,7 +955,7 @@ abstract class FSConnection extends StrictLogging {
             adapter.info(
               logMarker,
               s"""Channel call state event for callId
-                 |${eventMessage.headers("Caller-Unique-ID")}
+                 |${eventMessage.headers(HeaderNames.uniqueId)}
                  |>> MAP command is below
                  |${eventMap
                 .map({ item =>
@@ -1219,8 +1219,21 @@ abstract class FSConnection extends StrictLogging {
                   .mkString("\n")}""".stripMargin
               )
             }
-          case Some(job) if commandToQueue.command.isInstanceOf[Dial]        =>
-          case Some(job) if commandToQueue.command.isInstanceOf[DialSession] =>
+          case Some(job) if commandToQueue.command.isInstanceOf[Dial] => {}
+          case Some(job)
+              if commandToQueue.command.isInstanceOf[DialSession] => {
+            eventMessage.body match {
+              case Some(err) if err.startsWith("-ERR ") => {
+                val fSCommandFailed = FSCommandFailed(err.drop(5), eventMessage)
+                commandToQueue.executeEvent.complete(Failure(fSCommandFailed))
+                commandToQueue.executeComplete.complete(
+                  Failure(fSCommandFailed)
+                )
+                eventMap.remove()
+              }
+              case _ =>
+            }
+          }
           case Some(job) =>
             job.executeComplete.complete(Success(eventMessage))
             if (job.executeEvent.isCompleted)
@@ -1253,7 +1266,7 @@ abstract class FSConnection extends StrictLogging {
         adapter.info(
           logMarker,
           s"""Channel state event for callId
-             |${eventMessage.headers("Caller-Unique-ID")}
+             |${eventMessage.headers(HeaderNames.uniqueId)}
              |>> MAP command is below
              |${eventMap
             .map({ item =>
@@ -1287,7 +1300,7 @@ abstract class FSConnection extends StrictLogging {
         adapter.info(
           logMarker,
           s"""Channel call state event for callId
-             |${eventMessage.headers("Caller-Unique-ID")}
+             |${eventMessage.headers(HeaderNames.uniqueId)}
              |>> MAP command is below
              |${eventMap
             .map({ item =>
@@ -1897,6 +1910,9 @@ abstract class FSConnection extends StrictLogging {
 }
 
 object FSConnection {
+
+  case class FSCommandFailed(reason: String, nsg: EventMessage)
+      extends Exception(reason)
 
   sealed trait FSCommandPublication {
     def command: FSCommand
