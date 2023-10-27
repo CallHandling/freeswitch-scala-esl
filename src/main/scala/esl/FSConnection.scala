@@ -852,10 +852,10 @@ abstract class FSConnection extends StrictLogging {
     )
 
     def completeAndRemoveFromMap(
-                                  command: FSCommand,
-                                  executeComplete: Promise[EventMessage],
-                                  canRemove: Boolean
-                                ): Unit = {
+        command: FSCommand,
+        executeComplete: Promise[EventMessage],
+        canRemove: Boolean
+    ): Unit = {
       executeComplete.complete(Success(eventMessage))
       if (canRemove) {
         eventMap.remove(command.eventUuid)
@@ -865,24 +865,20 @@ abstract class FSConnection extends StrictLogging {
              |>> TYPE
              |EVENT ${eventMessage.eventName.getOrElse("NA")}
              |>> HEADERS
-             |${
-            eventMessage.headers
-              .map(h => h._1 + " : " + h._2)
-              .mkString(space, "\n" + space, "")
-          }
+             |${eventMessage.headers
+            .map(h => h._1 + " : " + h._2)
+            .mkString(space, "\n" + space, "")}
              |>> BODY
              |${eventMessage.body}
              |>> MAP is below
-             |${
-            eventMap
-              .map({
-                case (key, value) =>
-                  s"""appId: $key
+             |${eventMap
+            .map({
+              case (key, value) =>
+                s"""appId: $key
                      |command
                      |$value""".stripMargin
-              })
-              .mkString("\n")
-          }""".stripMargin
+            })
+            .mkString("\n")}""".stripMargin
         )
       }
     }
@@ -896,42 +892,40 @@ abstract class FSConnection extends StrictLogging {
       eventMessage.jobUuid.flatMap(eventMap.get)
     ) match {
       case (_, _, _, Some(EventNames.Custom), _, _)
-        if eventMessage.conferenceName.isDefined &&
-          (eventMessage.action.isDefined && conferenceAppSet.contains(
-            eventMessage.action.get
-          )) =>
+          if eventMessage.conferenceName.isDefined &&
+            (eventMessage.action.isDefined && conferenceAppSet.contains(
+              eventMessage.action.get
+            )) =>
         adapter.info(
           logMarker,
           s"""Channel custom event ${eventMessage.action} for callId
              |${eventMessage.headers.get("Unique-ID")}
              |>> MAP command is below
-             |${
-            eventMap
-              .map({ item =>
-                s"""appId: ${item._1}
+             |${eventMap
+            .map({ item =>
+              s"""appId: ${item._1}
                    |command
                    |${item._2.command}
                    |command type ${item._2.command.getClass}""".stripMargin
-              })
-              .mkString("\n")
-          }""".stripMargin
+            })
+            .mkString("\n")}""".stripMargin
         )
         val findResult =
           eventMap.find { //TODO change eventMap key for this command
             case (_, CommandToQueue(command: AddToConference, _, _))
-              if eventMessage.conferenceName.contains(
-                command.conferenceId
-              ) && eventMessage.action.contains("add-member") =>
+                if eventMessage.conferenceName.contains(
+                  command.conferenceId
+                ) && eventMessage.action.contains("add-member") =>
               true
             case (_, CommandToQueue(command: ConferenceCommand, _, _))
-              if eventMessage.conferenceName.contains(
-                command.conferenceId
-              ) && (command.command match {
-                case SendConferenceCommand(_, cmd, _)
-                  if eventMessage.action.fold(false)(_.startsWith(cmd)) =>
-                  true
-                case _ => false
-              }) =>
+                if eventMessage.conferenceName.contains(
+                  command.conferenceId
+                ) && (command.command match {
+                  case SendConferenceCommand(_, cmd, _)
+                      if eventMessage.action.fold(false)(_.startsWith(cmd)) =>
+                    true
+                  case _ => false
+                }) =>
               true
             case _ => false
           }
@@ -948,8 +942,8 @@ abstract class FSConnection extends StrictLogging {
           channelId <- uuid
           command <-
             eventMap.collectFirst { //TODO change eventMap key for this command
-              case (_, queCommand@CommandToQueue(command: OffHold, _, _))
-                if command.config.channelUuid == channelId =>
+              case (_, queCommand @ CommandToQueue(command: OffHold, _, _))
+                  if command.config.channelUuid == channelId =>
                 queCommand
             }
         } yield {
@@ -958,18 +952,16 @@ abstract class FSConnection extends StrictLogging {
             adapter.info(
               logMarker,
               s"""Channel call state event for callId
-                 |${eventMessage.headers("Caller-Unique-ID")}
+                 |${eventMessage.headers(HeaderNames.uniqueId)}
                  |>> MAP command is below
-                 |${
-                eventMap
-                  .map({ item =>
-                    s"""appId: ${item._1}
+                 |${eventMap
+                .map({ item =>
+                  s"""appId: ${item._1}
                        |command
                        |${item._2.command}
                        |command type ${item._2.command.getClass}""".stripMargin
-                  })
-                  .mkString("\n")
-              }""".stripMargin
+                })
+                .mkString("\n")}""".stripMargin
             )
           }
         }
@@ -1020,13 +1012,13 @@ abstract class FSConnection extends StrictLogging {
       }
        */
       case (
-        _,
-        Some(CommandToQueue(command: Dial, _, _)),
-        _,
-        Some(EventNames.ChannelExecute),
-        _,
-        _
-        ) =>
+            _,
+            Some(CommandToQueue(command: Dial, _, _)),
+            _,
+            Some(EventNames.ChannelExecute),
+            _,
+            _
+          ) =>
         adapter.info(
           logMarker,
           s"""command skipped $command
@@ -1034,35 +1026,33 @@ abstract class FSConnection extends StrictLogging {
              |Channel call state event for callId
              |${eventMessage.headers("Caller-Unique-ID")}
              |>> MAP command is below
-             |${
-            eventMap
-              .map({ item =>
-                s"""appId: ${item._1}
+             |${eventMap
+            .map({ item =>
+              s"""appId: ${item._1}
                    |command
                    |${item._2.command}
                    |command type ${item._2.command.getClass}""".stripMargin
-              })
-              .mkString("\n")
-          }""".stripMargin
+            })
+            .mkString("\n")}""".stripMargin
         )
       //skip for dial command
       case (
-        _,
-        Some(CommandToQueue(command: DialSession, _, _)),
-        _,
-        Some(EventNames.ChannelExecute),
-        _,
-        _
-        ) =>
+            _,
+            Some(CommandToQueue(command: DialSession, _, _)),
+            _,
+            Some(EventNames.ChannelExecute),
+            _,
+            _
+          ) =>
       //skip for dial commands
       case (
-        _,
-        Some(CommandToQueue(command: Dial, _, _)),
-        _,
-        Some(EventNames.ChannelExecuteComplete),
-        _,
-        _
-        ) =>
+            _,
+            Some(CommandToQueue(command: Dial, _, _)),
+            _,
+            Some(EventNames.ChannelExecuteComplete),
+            _,
+            _
+          ) =>
         adapter.info(
           logMarker,
           s"""command skipped $command
@@ -1070,45 +1060,43 @@ abstract class FSConnection extends StrictLogging {
              |Channel call state event for callId
              |${eventMessage.headers("Caller-Unique-ID")}
              |>> MAP command is below
-             |${
-            eventMap
-              .map({ item =>
-                s"""appId: ${item._1}
+             |${eventMap
+            .map({ item =>
+              s"""appId: ${item._1}
                    |command
                    |${item._2.command}
                    |command type ${item._2.command.getClass}""".stripMargin
-              })
-              .mkString("\n")
-          }""".stripMargin
+            })
+            .mkString("\n")}""".stripMargin
         )
       //skip for dial command
       case (
-        _,
-        Some(CommandToQueue(command: DialSession, _, _)),
-        _,
-        Some(EventNames.ChannelExecuteComplete),
-        _,
-        _
-        ) =>
+            _,
+            Some(CommandToQueue(command: DialSession, _, _)),
+            _,
+            Some(EventNames.ChannelExecuteComplete),
+            _,
+            _
+          ) =>
       //skip for dial commands
 
       case (_, Some(commandToQueue), _, Some(EventNames.ChannelExecute), _, _)
-        if !eventMessage.answerState.contains(AnswerStates.Early) &&
-          !eventMessage.applicationName.contains("set") =>
+          if !eventMessage.answerState.contains(AnswerStates.Early) &&
+            !eventMessage.applicationName.contains("set") =>
         if (!commandToQueue.executeEvent.isCompleted)
           commandToQueue.executeEvent.complete(Success(eventMessage))
         if (commandToQueue.executeComplete.isCompleted)
           eventMap.remove(commandToQueue.command.eventUuid)
       case (
-        Some(appId),
-        Some(commandToQueue),
-        _,
-        Some(EventNames.ChannelExecuteComplete),
-        _,
-        _
-        )
-        if !eventMessage.answerState.contains(AnswerStates.Early) &&
-          !eventMessage.applicationName.contains("set") =>
+            Some(appId),
+            Some(commandToQueue),
+            _,
+            Some(EventNames.ChannelExecuteComplete),
+            _,
+            _
+          )
+          if !eventMessage.answerState.contains(AnswerStates.Early) &&
+            !eventMessage.applicationName.contains("set") =>
         if (!commandToQueue.executeComplete.isCompleted)
           commandToQueue.executeComplete.complete(Success(eventMessage))
         if (commandToQueue.executeEvent.isCompleted)
@@ -1119,41 +1107,37 @@ abstract class FSConnection extends StrictLogging {
              |>> TYPE
              |EVENT ${eventMessage.eventName.getOrElse("NA")}
              |>> HEADERS
-             |${
-            eventMessage.headers
-              .map(h => h._1 + " : " + h._2)
-              .mkString(space, "\n" + space, "")
-          }
+             |${eventMessage.headers
+            .map(h => h._1 + " : " + h._2)
+            .mkString(space, "\n" + space, "")}
              |>> BODY
              |${eventMessage.body}
              |>> MAP is below
-             |${
-            eventMap
-              .map({ item =>
-                s"""appId: ${item._1}
+             |${eventMap
+            .map({ item =>
+              s"""appId: ${item._1}
                    |command
                    |${item._2.command}""".stripMargin
-              })
-              .mkString("\n")
-          }""".stripMargin
+            })
+            .mkString("\n")}""".stripMargin
         )
       case (
-        Some(appId),
-        Some(CommandToQueue(command: Record, execute, executeComplete)),
-        _,
-        Some(EventNames.ChannelExecuteComplete),
-        _,
-        _
-        ) if appId == command.eventUuid =>
+            Some(appId),
+            Some(CommandToQueue(command: Record, execute, executeComplete)),
+            _,
+            Some(EventNames.ChannelExecuteComplete),
+            _,
+            _
+          ) if appId == command.eventUuid =>
         completeAndRemoveFromMap(command, executeComplete, execute.isCompleted)
       case (
-        Some(appId),
-        Some(CommandToQueue(command: PlayFile, execute, executeComplete)),
-        _,
-        Some(EventNames.ChannelExecuteComplete),
-        _,
-        _
-        ) if appId == command.eventUuid =>
+            Some(appId),
+            Some(CommandToQueue(command: PlayFile, execute, executeComplete)),
+            _,
+            Some(EventNames.ChannelExecuteComplete),
+            _,
+            _
+          ) if appId == command.eventUuid =>
         completeAndRemoveFromMap(command, executeComplete, execute.isCompleted)
       case (_, _, _, Some(EventNames.Api), _, _) =>
         if (
@@ -1188,12 +1172,12 @@ abstract class FSConnection extends StrictLogging {
                   .zip(targets)
                   .forall(tuple => tuple._1 == tuple._2)
             }
-          queuedCommand.map {
+          queuedCommand.foreach {
             case CommandToQueue(
-            command: BridgeUuid,
-            executeEvent,
-            executeComplete
-            ) =>
+                  command: BridgeUuid,
+                  executeEvent,
+                  executeComplete
+                ) =>
               completeAndRemoveFromMap(
                 command,
                 executeEvent,
@@ -1202,30 +1186,41 @@ abstract class FSConnection extends StrictLogging {
           }
         }
       case (
-        _,
-        _,
-        _,
-        Some(EventNames.BackgroundJob),
-        Some(jobId),
-        Some(commandToQueue: CommandToQueue)
-        ) if commandToQueue.command.isInstanceOf[Dial]  =>
+            _,
+            _,
+            _,
+            Some(EventNames.BackgroundJob),
+            Some(jobId),
+            Some(commandToQueue: CommandToQueue)
+          ) if commandToQueue.command.isInstanceOf[Dial] =>
       case (
-        _,
-        _,
-        _,
-        Some(EventNames.BackgroundJob),
-        Some(jobId),
-        Some(commandToQueue: CommandToQueue)
-        ) if commandToQueue.command.isInstanceOf[DialSession]  =>
-
+            _,
+            _,
+            _,
+            Some(EventNames.BackgroundJob),
+            Some(jobId),
+            Some(commandToQueue: CommandToQueue)
+          ) if commandToQueue.command.isInstanceOf[DialSession] => {
+        eventMessage.body match {
+          case Some(err) if err.startsWith("-ERR ") => {
+            val fSCommandFailed = FSCommandFailed(err.drop(5), eventMessage)
+            commandToQueue.executeEvent.complete(Failure(fSCommandFailed))
+            commandToQueue.executeComplete.complete(
+              Failure(fSCommandFailed)
+            )
+            eventMap.remove(jobId)
+          }
+          case _ =>
+        }
+      }
       case (
-        _,
-        _,
-        _,
-        Some(EventNames.BackgroundJob),
-        Some(jobId),
-        Some(commandToQueue: CommandToQueue)
-        ) =>
+            _,
+            _,
+            _,
+            Some(EventNames.BackgroundJob),
+            Some(jobId),
+            Some(commandToQueue: CommandToQueue)
+          ) =>
         //val jobId = eventMap.get(eventMessage.jobUuid.getOrElse(""))
 
         /*>> TYPE
@@ -1254,11 +1249,13 @@ abstract class FSConnection extends StrictLogging {
             +OK Success
          */
 
-        if ((eventMessage.jobCommand.fold(false)(
-          _ == "uuid_hold"
-        ) && eventMessage.jobCommandArg.fold(false)(
-          _.startsWith("off")
-        )) || eventMessage.jobCommand.fold(false)(_ == "conference")) {
+        if (
+          (eventMessage.jobCommand.fold(false)(
+            _ == "uuid_hold"
+          ) && eventMessage.jobCommandArg.fold(false)(
+            _.startsWith("off")
+          )) || eventMessage.jobCommand.fold(false)(_ == "conference")
+        ) {
 
           commandToQueue.executeEvent.complete(Success(eventMessage))
           if (commandToQueue.executeComplete.isCompleted) {
@@ -1269,23 +1266,19 @@ abstract class FSConnection extends StrictLogging {
                  |>> TYPE
                  |EVENT ${eventMessage.eventName.getOrElse("NA")}
                  |>> HEADERS
-                 |${
-                eventMessage.headers
-                  .map(h => h._1 + " : " + h._2)
-                  .mkString(space, "\n" + space, "")
-              }
+                 |${eventMessage.headers
+                .map(h => h._1 + " : " + h._2)
+                .mkString(space, "\n" + space, "")}
                  |>> BODY
                  |${eventMessage.body}
                  |>> MAP is below
-                 |${
-                eventMap
-                  .map({ item =>
-                    s"""appId: ${item._1}
+                 |${eventMap
+                .map({ item =>
+                  s"""appId: ${item._1}
                        |command
                        |${item._2.command}""".stripMargin
-                  })
-                  .mkString("\n")
-              }""".stripMargin
+                })
+                .mkString("\n")}""".stripMargin
             )
           }
         } else if (eventMessage.jobCommand.fold(false)(_ != "originate")) {
@@ -1298,23 +1291,19 @@ abstract class FSConnection extends StrictLogging {
                |>> TYPE
                |EVENT ${eventMessage.eventName.getOrElse("NA")}
                |>> HEADERS
-               |${
-              eventMessage.headers
-                .map(h => h._1 + " : " + h._2)
-                .mkString(space, "\n" + space, "")
-            }
+               |${eventMessage.headers
+              .map(h => h._1 + " : " + h._2)
+              .mkString(space, "\n" + space, "")}
                |>> BODY
                |${eventMessage.body}
                |>> MAP is below
-               |${
-              eventMap
-                .map({ item =>
-                  s"""appId: ${item._1}
+               |${eventMap
+              .map({ item =>
+                s"""appId: ${item._1}
                      |command
                      |${item._2.command}""".stripMargin
-                })
-                .mkString("\n")
-            }""".stripMargin
+              })
+              .mkString("\n")}""".stripMargin
           )
         }
 
@@ -1322,25 +1311,23 @@ abstract class FSConnection extends StrictLogging {
         adapter.info(
           logMarker,
           s"""Channel state event for callId
-             |${eventMessage.headers("Caller-Unique-ID")}
+             |${eventMessage.headers(HeaderNames.uniqueId)}
              |>> MAP command is below
-             |${
-            eventMap
-              .map({ item =>
-                s"""appId: ${item._1}
+             |${eventMap
+            .map({ item =>
+              s"""appId: ${item._1}
                    |command
                    |${item._2.command}
                    |command type ${item._2.command.getClass}""".stripMargin
-              })
-              .mkString("\n")
-          }""".stripMargin
+            })
+            .mkString("\n")}""".stripMargin
         )
         val findResult =
           eventMap.find { //TODO change eventMap key for this command
             case (
-              _,
-              CommandToQueue(command: Dial, _, _)
-              ) =>
+                  _,
+                  CommandToQueue(command: Dial, _, _)
+                ) =>
               eventMessage.callerUniqueId.contains(command.options.uniqueId)
             case (_, CommandToQueue(command: DialSession, _, _)) =>
               eventMessage.callerUniqueId.contains(command.options.uniqueId)
@@ -1358,18 +1345,16 @@ abstract class FSConnection extends StrictLogging {
         adapter.info(
           logMarker,
           s"""Channel call state event for callId
-             |${eventMessage.headers("Caller-Unique-ID")}
+             |${eventMessage.headers(HeaderNames.uniqueId)}
              |>> MAP command is below
-             |${
-            eventMap
-              .map({ item =>
-                s"""appId: ${item._1}
+             |${eventMap
+            .map({ item =>
+              s"""appId: ${item._1}
                    |command
                    |${item._2.command}
                    |command type ${item._2.command.getClass}""".stripMargin
-              })
-              .mkString("\n")
-          }""".stripMargin
+            })
+            .mkString("\n")}""".stripMargin
         )
         (for {
           (key, command) <- eventMap.find {
@@ -1401,15 +1386,15 @@ abstract class FSConnection extends StrictLogging {
         eventMap
           .collectFirst({
             case (
-              key,
-              CommandToQueue(
-              command: ListenIn,
-              executeEvent,
-              executeComplete
-              )
-              )
-              if eventMessage.eavesdropTarget
-                .fold(false)(_ == command.listenCallId) =>
+                  key,
+                  CommandToQueue(
+                    command: ListenIn,
+                    executeEvent,
+                    executeComplete
+                  )
+                )
+                if eventMessage.eavesdropTarget
+                  .fold(false)(_ == command.listenCallId) =>
               executeComplete.complete(Success(eventMessage))
               if (executeEvent.isCompleted) Some(key)
               else Option.empty[String]
@@ -1425,11 +1410,9 @@ abstract class FSConnection extends StrictLogging {
              |>> TYPE
              |EVENT ${eventMessage.eventName.fold("NA")(_.name)}
              |>> HEADERS
-             |${
-            eventMessage.headers
-              .map(h => h._1 + " : " + h._2)
-              .mkString(space, "\n" + space, "")
-          }
+             |${eventMessage.headers
+            .map(h => h._1 + " : " + h._2)
+            .mkString(space, "\n" + space, "")}
              |>> BODY
              |${eventMessage.body}""".stripMargin
         )
@@ -1440,11 +1423,9 @@ abstract class FSConnection extends StrictLogging {
              |>> TYPE
              |EVENT ${eventMessage.eventName}
              |>> HEADERS
-             |${
-            eventMessage.headers
-              .map(h => h._1 + " : " + h._2)
-              .mkString(space, "\n" + space, "")
-          }
+             |${eventMessage.headers
+            .map(h => h._1 + " : " + h._2)
+            .mkString(space, "\n" + space, "")}
              |>> BODY
              |${eventMessage.body}""".stripMargin
         )
@@ -1988,6 +1969,9 @@ abstract class FSConnection extends StrictLogging {
 }
 
 object FSConnection {
+
+  case class FSCommandFailed(reason: String, nsg: EventMessage)
+      extends Exception(reason)
 
   sealed trait FSCommandPublication {
     def command: FSCommand
