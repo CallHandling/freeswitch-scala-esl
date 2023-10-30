@@ -101,7 +101,7 @@ abstract class FSConnection extends StrictLogging {
   /**
     * This queue maintain the promise of CommandReply for each respective FSCommand
     */
-  private[this] val commandQueue: mutable.Queue[Promise[CommandReply]] =
+  private[this] val commandQueue: mutable.Queue[CommandReplyLookUpItem] =
     mutable.Queue.empty
 
   private[this] val eventMap
@@ -270,7 +270,11 @@ abstract class FSConnection extends StrictLogging {
       callId: String,
       fsConnectionPromise: Promise[FSSocket[FS]],
       fsConnection: FS,
-      fun: (String, Future[FSSocket[FS]], Future[FS]) => Sink[FSData, Mat],
+      fun: (
+          String,
+          Future[FSSocket[FS]],
+          Future[FS]
+      ) => Sink[FSDataWithCommand, Mat],
       timeout: FiniteDuration,
       needToLinger: Boolean,
       isInbound: Boolean = false
@@ -775,10 +779,10 @@ abstract class FSConnection extends StrictLogging {
             }
           }
           List(
-            updatedFSData
-              .copy(fsMessages =
-                updatedFSData.fsMessages.map(f => handleFSMessage(f))
-              )
+            FSConnection.FSDataWithCommand(
+              updatedFSData.fSConnection,
+              updatedFSData.fsMessages.map(f => handleFSMessage(f))
+            )
           )
         }
       })
@@ -793,14 +797,26 @@ abstract class FSConnection extends StrictLogging {
     * @param fSMessage : FSMessage FS message
     * @return FSMessage
     */
-  private def handleFSMessage(fSMessage: FSMessage): FSMessage =
+  private def handleFSMessage(fSMessage: FSMessage): FSMessageWithCommand =
     fSMessage match {
-      case cmdReply: CommandReply => handleCommandReplyMessage(cmdReply)
+      case cmdReply: CommandReply => {
+        val (reply, cmd) = handleCommandReplyMessage(cmdReply)
+        FSMessageWithCommand(reply, cmd)
+      }
       case apiResponse: ApiResponse =>
-        apiResponse //TODO Will implement logic for handle an api response
-      case eventMessage: EventMessage => handleFSEventMessage(eventMessage)
+        FSMessageWithCommand(
+          apiResponse,
+          Option.empty
+        ) //TODO Will implement logic for handle an api response
+      case eventMessage: EventMessage => {
+        val (event, cmd) = handleFSEventMessage(eventMessage)
+        FSMessageWithCommand(event, cmd)
+      }
       case basicMessage: BasicMessage =>
-        basicMessage //TODO Will implement logic for handle the basic message
+        FSMessageWithCommand(
+          basicMessage,
+          Option.empty
+        ) //TODO Will implement logic for handle the basic message
     }
 
   /**
@@ -811,21 +827,25 @@ abstract class FSConnection extends StrictLogging {
     */
   private def handleCommandReplyMessage(
       cmdReply: CommandReply
-  ): CommandReply = {
+  ): (CommandReply, Option[FSCommand]) = {
     if (commandQueue.nonEmpty) {
-      val promise = commandQueue.dequeue()
+      val lookup = commandQueue.dequeue()
       if (cmdReply.success)
-        promise.complete(Success(cmdReply))
+        lookup.reply.complete(Success(cmdReply))
       else
-        promise.complete(
+        lookup.reply.complete(
           Failure(
             new Exception(
               s"Failed to get success reply: ${cmdReply.errorMessage}"
             )
           )
         )
+
+      cmdReply -> Some(lookup.command)
+    } else {
+
+      cmdReply -> Option.empty
     }
-    cmdReply
   }
 
   private val space = "    "
@@ -837,7 +857,9 @@ abstract class FSConnection extends StrictLogging {
     * @param eventMessage : EventMessage
     * @return EventMessage
     */
-  private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
+  private def handleFSEventMessage(
+      eventMessage: EventMessage
+  ): (EventMessage, Option[FSCommand]) = {
 
     lazy val conferenceAppSet = Set(
       "add-member",
@@ -883,7 +905,7 @@ abstract class FSConnection extends StrictLogging {
       }
     }
 
-    (
+    val cmd: Option[FSCommand] = (
       eventMessage.applicationUuid,
       eventMessage.applicationUuid.flatMap(eventMap.get),
       eventMessage.uuid,
@@ -934,21 +956,22 @@ abstract class FSConnection extends StrictLogging {
             if (!command.executeComplete.isCompleted)
               command.executeComplete.complete(Success(eventMessage))
             if (command.executeEvent.isCompleted) eventMap.remove(key)
-          case _ =>
+            Some(command.command)
+          case _ => Option.empty
         }
 
       case (_, _, uuid, Some(EventNames.ChannelUnhold), _, _) =>
         for {
           channelId <- uuid
-          command <-
+          commandToQueue <-
             eventMap.collectFirst { //TODO change eventMap key for this command
               case (_, queCommand @ CommandToQueue(command: OffHold, _, _))
                   if command.config.channelUuid == channelId =>
                 queCommand
             }
         } yield {
-          command.executeComplete.complete(Success(eventMessage))
-          if (command.executeEvent.isCompleted) {
+          commandToQueue.executeComplete.complete(Success(eventMessage))
+          if (commandToQueue.executeEvent.isCompleted) {
             adapter.info(
               logMarker,
               s"""Channel call state event for callId
@@ -964,6 +987,7 @@ abstract class FSConnection extends StrictLogging {
                 .mkString("\n")}""".stripMargin
             )
           }
+          commandToQueue.command
         }
       /*
       case (
@@ -1018,7 +1042,7 @@ abstract class FSConnection extends StrictLogging {
             Some(EventNames.ChannelExecute),
             _,
             _
-          ) =>
+          ) => {
         adapter.info(
           logMarker,
           s"""command skipped $command
@@ -1035,6 +1059,8 @@ abstract class FSConnection extends StrictLogging {
             })
             .mkString("\n")}""".stripMargin
         )
+        Some(command)
+      }
       //skip for dial command
       case (
             _,
@@ -1043,8 +1069,11 @@ abstract class FSConnection extends StrictLogging {
             Some(EventNames.ChannelExecute),
             _,
             _
-          ) =>
-      //skip for dial commands
+          ) => {
+        //skip for dial commands
+
+        Some(command)
+      }
       case (
             _,
             Some(CommandToQueue(command: Dial, _, _)),
@@ -1052,7 +1081,7 @@ abstract class FSConnection extends StrictLogging {
             Some(EventNames.ChannelExecuteComplete),
             _,
             _
-          ) =>
+          ) => {
         adapter.info(
           logMarker,
           s"""command skipped $command
@@ -1069,7 +1098,10 @@ abstract class FSConnection extends StrictLogging {
             })
             .mkString("\n")}""".stripMargin
         )
-      //skip for dial command
+        //skip for dial command
+
+        Some(command)
+      }
       case (
             _,
             Some(CommandToQueue(command: DialSession, _, _)),
@@ -1077,16 +1109,20 @@ abstract class FSConnection extends StrictLogging {
             Some(EventNames.ChannelExecuteComplete),
             _,
             _
-          ) =>
-      //skip for dial commands
+          ) => {
+        //skip for dial commands
 
+        Some(command)
+      }
       case (_, Some(commandToQueue), _, Some(EventNames.ChannelExecute), _, _)
           if !eventMessage.answerState.contains(AnswerStates.Early) &&
-            !eventMessage.applicationName.contains("set") =>
+            !eventMessage.applicationName.contains("set") => {
         if (!commandToQueue.executeEvent.isCompleted)
           commandToQueue.executeEvent.complete(Success(eventMessage))
         if (commandToQueue.executeComplete.isCompleted)
           eventMap.remove(commandToQueue.command.eventUuid)
+        Some(commandToQueue.command)
+      }
       case (
             Some(appId),
             Some(commandToQueue),
@@ -1121,6 +1157,7 @@ abstract class FSConnection extends StrictLogging {
             })
             .mkString("\n")}""".stripMargin
         )
+        Some(commandToQueue.command)
       case (
             Some(appId),
             Some(CommandToQueue(command: Record, execute, executeComplete)),
@@ -1128,8 +1165,10 @@ abstract class FSConnection extends StrictLogging {
             Some(EventNames.ChannelExecuteComplete),
             _,
             _
-          ) if appId == command.eventUuid =>
+          ) if appId == command.eventUuid => {
         completeAndRemoveFromMap(command, executeComplete, execute.isCompleted)
+        Some(command)
+      }
       case (
             Some(appId),
             Some(CommandToQueue(command: PlayFile, execute, executeComplete)),
@@ -1137,8 +1176,10 @@ abstract class FSConnection extends StrictLogging {
             Some(EventNames.ChannelExecuteComplete),
             _,
             _
-          ) if appId == command.eventUuid =>
+          ) if appId == command.eventUuid => {
         completeAndRemoveFromMap(command, executeComplete, execute.isCompleted)
+        Some(command)
+      }
       case (_, _, _, Some(EventNames.Api), _, _) =>
         if (
           eventMessage.apiCommand.contains(
@@ -1149,10 +1190,12 @@ abstract class FSConnection extends StrictLogging {
           val queuedCommand =
             eventMap.get(eventMessage.headers("API-Command-Argument"))
           queuedCommand.map {
-            case CommandToQueue(_: CreateUUID, executeEvent, _) =>
+            case CommandToQueue(cmd: CreateUUID, executeEvent, _) => {
               executeEvent.complete(Success(eventMessage))
+              cmd
+            }
           }
-        }
+        } else Option.empty
 
       case (_, _, _, Some(EventNames.Api), _, _) =>
         if (
@@ -1172,7 +1215,7 @@ abstract class FSConnection extends StrictLogging {
                   .zip(targets)
                   .forall(tuple => tuple._1 == tuple._2)
             }
-          queuedCommand.foreach {
+          queuedCommand.map {
             case CommandToQueue(
                   command: BridgeUuid,
                   executeEvent,
@@ -1183,8 +1226,9 @@ abstract class FSConnection extends StrictLogging {
                 executeEvent,
                 executeComplete.isCompleted
               )
+              command
           }
-        }
+        } else Option.empty
       case (
             _,
             _,
@@ -1192,7 +1236,9 @@ abstract class FSConnection extends StrictLogging {
             Some(EventNames.BackgroundJob),
             Some(jobId),
             Some(commandToQueue: CommandToQueue)
-          ) if commandToQueue.command.isInstanceOf[Dial] =>
+          ) if commandToQueue.command.isInstanceOf[Dial] => {
+        Some(commandToQueue.command)
+      }
       case (
             _,
             _,
@@ -1212,6 +1258,7 @@ abstract class FSConnection extends StrictLogging {
           }
           case _ =>
         }
+        Some(commandToQueue.command)
       }
       case (
             _,
@@ -1256,7 +1303,6 @@ abstract class FSConnection extends StrictLogging {
             _.startsWith("off")
           )) || eventMessage.jobCommand.fold(false)(_ == "conference")
         ) {
-
           commandToQueue.executeEvent.complete(Success(eventMessage))
           if (commandToQueue.executeComplete.isCompleted) {
             eventMap.remove(commandToQueue.command.eventUuid)
@@ -1306,7 +1352,7 @@ abstract class FSConnection extends StrictLogging {
               .mkString("\n")}""".stripMargin
           )
         }
-
+        Some(commandToQueue.command)
       case (_, _, _, Some(EventNames.ChannelState), _, _) =>
         adapter.info(
           logMarker,
@@ -1335,11 +1381,15 @@ abstract class FSConnection extends StrictLogging {
           }
         adapter.info(s"Command from map $findResult")
         findResult match {
-          case Some((key, command)) =>
-            if (!command.executeEvent.isCompleted)
-              command.executeEvent.complete(Success(eventMessage))
-            if (command.executeComplete.isCompleted) eventMap.remove(key)
-          case _ =>
+          case Some((key, commandToQueue)) => {
+            if (!commandToQueue.executeEvent.isCompleted)
+              commandToQueue.executeEvent.complete(Success(eventMessage))
+            if (commandToQueue.executeComplete.isCompleted) {
+              eventMap.remove(key)
+            }
+            Some(commandToQueue.command)
+          }
+          case _ => Option.empty
         }
       case (_, _, _, Some(EventNames.ChannelCallState), _, _) =>
         adapter.info(
@@ -1374,11 +1424,12 @@ abstract class FSConnection extends StrictLogging {
             promise.complete(Success(eventMessage))
           }
           (key, command)
-        }).headOption.foreach({
-          case (key, command) => {
+        }).headOption.map({
+          case (key, commandToQueue) => {
             if (
-              command.executeComplete.isCompleted && command.executeComplete.isCompleted
+              commandToQueue.executeComplete.isCompleted && commandToQueue.executeComplete.isCompleted
             ) eventMap.remove(key)
+            commandToQueue.command
           }
         })
 
@@ -1396,14 +1447,14 @@ abstract class FSConnection extends StrictLogging {
                 if eventMessage.eavesdropTarget
                   .fold(false)(_ == command.listenCallId) =>
               executeComplete.complete(Success(eventMessage))
-              if (executeEvent.isCompleted) Some(key)
-              else Option.empty[String]
+              if (executeEvent.isCompleted) {
+                eventMap.remove(key)
+              }
+              command
           })
-          .flatten
-          .foreach(eventMap.remove)
       }
 
-      case (appId, _, _, _, jobId, _) =>
+      case (appId, _, _, _, jobId, _) => {
         adapter.warning(
           logMarker,
           s"""handleFSEventMessage for app id $appId jobId $jobId Unable to handle Command (unexpected eventName header)
@@ -1416,21 +1467,10 @@ abstract class FSConnection extends StrictLogging {
              |>> BODY
              |${eventMessage.body}""".stripMargin
         )
-      case _ =>
-        adapter.debug(
-          logMarker,
-          s"""handleFSEventMessage Unable to find application id header for event message
-             |>> TYPE
-             |EVENT ${eventMessage.eventName}
-             |>> HEADERS
-             |${eventMessage.headers
-            .map(h => h._1 + " : " + h._2)
-            .mkString(space, "\n" + space, "")}
-             |>> BODY
-             |${eventMessage.body}""".stripMargin
-        )
+        Option.empty
+      }
     }
-    eventMessage
+    eventMessage -> cmd
   }
 
   /**
@@ -1481,7 +1521,7 @@ abstract class FSConnection extends StrictLogging {
         case QueueOfferResult.Enqueued => {
           val (commandReply, commandToQueue, cmdResponse) =
             buildCommandAndResponse(command)
-          commandQueue.enqueue(commandReply)
+          commandQueue.enqueue(CommandReplyLookUpItem(command, commandReply))
           val appId = command.eventUuid
           eventMap.put(appId, commandToQueue)
           adapter.info(
@@ -2024,6 +2064,11 @@ object FSConnection {
       executeComplete: Future[EventMessage]
   )
 
+  case class CommandReplyLookUpItem(
+      command: FSCommand,
+      reply: Promise[CommandReply]
+  )
+
   /**
     *
     * @param command : FSCommand FS command
@@ -2066,6 +2111,13 @@ object FSConnection {
       extends Exception(s"FSSocket failed $cause")
 
   case class FSData(fSConnection: FSConnection, fsMessages: List[FSMessage])
+
+  case class FSDataWithCommand(
+      fSConnection: FSConnection,
+      fsMessages: List[FSMessageWithCommand]
+  )
+
+  case class FSMessageWithCommand(fsMsg: FSMessage, fsCmd: Option[FSCommand])
 
   case class ChannelData(headers: Map[String, String]) {
     lazy val uuid: Option[String] = headers.get(HeaderNames.uniqueId)

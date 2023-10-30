@@ -18,32 +18,19 @@ package esl
 
 import akka.actor.ActorSystem
 import akka.event.{LogMarker, MarkerLoggingAdapter}
-import akka.stream.{
-  ActorAttributes,
-  Attributes,
-  KillSwitches,
-  Materializer,
-  NeverMaterializedException,
-  OverflowStrategy,
-  Supervision
-}
+import akka.stream.{ActorAttributes, Attributes, KillSwitches, Materializer, NeverMaterializedException, OverflowStrategy, Supervision}
 import akka.stream.scaladsl.Tcp.IncomingConnection
 import akka.stream.scaladsl.{BidiFlow, Framing, Keep, Sink, Source, Tcp}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.LazyLogging
-import esl.FSConnection.{FSCommandPublication, FSData, FSSocket}
+import esl.FSConnection.{FSCommandPublication, FSData, FSDataWithCommand, FSSocket}
 import esl.domain.FSMessage
 
 import java.util.UUID
 import scala.language.postfixOps
-import scala.concurrent.duration.{
-  Duration,
-  DurationInt,
-  FiniteDuration,
-  SECONDS
-}
+import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration, SECONDS}
 import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -162,20 +149,20 @@ class OutboundServer(
     * @return The stream is completed successfully or not
     */
   def startWith[Mat](
-      fun: (
+                      fun: (
           String,
           Future[FSSocket[OutboundFSConnection]],
           Future[OutboundFSConnection]
-      ) => Sink[FSData, Mat],
-      onFsConnectionStart: OutboundServer.OnConnectionCallBack[Mat] =
+      ) => Sink[FSDataWithCommand, Mat],
+                      onFsConnectionStart: OutboundServer.OnConnectionCallBack[Mat] =
         OutboundServer.OnConnectionCallBack.noop,
-      onSendCommand: Option[
+                      onSendCommand: Option[
         (
             String,
             OutboundFSConnection
         ) => PartialFunction[FSCommandPublication, Unit]
       ] = None,
-      onFsMsg: Option[(String, OutboundFSConnection) => PartialFunction[
+                      onFsMsg: Option[(String, OutboundFSConnection) => PartialFunction[
         (List[FSMessage], String, List[FSMessage]),
         Unit
       ]] = None
@@ -202,7 +189,7 @@ class OutboundServer(
           String,
           Future[FSSocket[OutboundFSConnection]],
           Future[OutboundFSConnection]
-      ) => Sink[FSData, Mat1],
+      ) => Sink[FSDataWithCommand, Mat1],
       flow: OutboundFSConnection => (
           Future[Done],
           Source[T, NotUsed],

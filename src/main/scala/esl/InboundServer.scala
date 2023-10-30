@@ -23,7 +23,7 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.{BidiFlow, Flow, Keep, Sink, Source, Tcp}
 import akka.util.ByteString
 import com.typesafe.config.Config
-import esl.FSConnection.{FSCommandPublication, FSData, FSSocket}
+import esl.FSConnection.{FSCommandPublication, FSData, FSDataWithCommand, FSSocket}
 import esl.domain.CallCommands.Dial
 import esl.domain.{ApplicationCommandConfig, EventNames, FSCommand, FSMessage}
 
@@ -161,7 +161,7 @@ class InboundServer(
           String,
           Future[FSSocket[InboundFSConnection]],
           Future[InboundFSConnection]
-      ) => Sink[FSData, Mat]
+      ) => Sink[FSDataWithCommand, Mat]
   ): Future[(Future[Done], Future[Mat])] = {
     val fsConnection = InboundFSConnection(enableDebugLogs)
     onFsMsg.foreach(fn => fsConnection.onReceiveMsg(fn(callId, fsConnection)))
