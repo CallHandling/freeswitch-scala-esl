@@ -1114,6 +1114,18 @@ abstract class FSConnection extends StrictLogging {
 
         Some(command)
       }
+      case (
+            _,
+            Some(CommandToQueue(command: Intercept, _, _)),
+            _,
+            Some(EventNames.ChannelExecuteComplete),
+            _,
+            _
+          ) => {
+        //skip for Intercept commands
+
+        Some(command)
+      }
       case (_, Some(commandToQueue), _, Some(EventNames.ChannelExecute), _, _)
           if !eventMessage.answerState.contains(AnswerStates.Early) &&
             !eventMessage.applicationName.contains("set") => {
@@ -1446,6 +1458,26 @@ abstract class FSConnection extends StrictLogging {
                 )
                 if eventMessage.eavesdropTarget
                   .fold(false)(_ == command.listenCallId) =>
+              executeComplete.complete(Success(eventMessage))
+              if (executeEvent.isCompleted) {
+                eventMap.remove(key)
+              }
+              command
+          })
+      }
+      case (_, _, _, Some(EventNames.ChannelBridge), _, _) => {
+        eventMap
+          .collectFirst({
+            case (
+                  key,
+                  CommandToQueue(
+                    command: Intercept,
+                    executeEvent,
+                    executeComplete
+                  )
+                )
+                if eventMessage.channelCallUUID
+                  .fold(false)(_ == command.config.channelUuid) && eventMessage.otherLegUUID.fold(false)(_ == command.uuid) =>
               executeComplete.complete(Success(eventMessage))
               if (executeEvent.isCompleted) {
                 eventMap.remove(key)

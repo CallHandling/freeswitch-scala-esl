@@ -149,10 +149,12 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
       .get(HeaderNames.channelState)
       .fold(Option.empty[ChannelStates.ChannelState])(ChannelStates.states.lift)
 
-  val channelCallState: Option[AnswerStates.AnswerState] =
-    headers
-      .get(HeaderNames.channelCallState)
+  lazy val channelCallState: Option[AnswerStates.AnswerState] =
+    channelCallStateRaw
       .fold(Option.empty[AnswerStates.AnswerState])(AnswerStates.states.lift)
+
+  lazy val channelCallStateRaw = headers
+    .get(HeaderNames.channelCallState)
 
   val answerState: Option[AnswerStates.AnswerState] =
     headers
