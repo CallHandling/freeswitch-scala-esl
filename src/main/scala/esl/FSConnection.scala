@@ -519,28 +519,57 @@ abstract class FSConnection extends StrictLogging {
             else if (
               eventMessage.eventName.contains(EventNames.ChannelExecuteComplete)
             ) {
-              commandToQueue.executeComplete.complete(Success(eventMessage))
-              eventMap.remove(commandToQueue.command.eventUuid)
-              adapter.info(
-                logMarker,
-                s"""handleFSEventMessage for app id $appId Removing entry
-                   |>> TYPE
-                   |EVENT ${eventMessage.eventName.getOrElse("NA")}
-                   |>> HEADERS
-                   |${eventMessage.headers
-                  .map(h => h._1 + " : " + h._2)
-                  .mkString(space, "\n" + space, "")}
-                   |>> BODY
-                   |${eventMessage.body}
-                   |>> MAP is below
-                   |${eventMap
-                  .map({ item =>
-                    s"""appId: ${item._1}
-                         |command
-                         |${item._2.command}""".stripMargin
-                  })
-                  .mkString("\n")}""".stripMargin
-              )
+
+              commandToQueue.command match {
+                case bridge: Bridge if !eventMessage.headers.contains("variable_sip_bye_h_X-CH-ByeReason") => {
+                  adapter.info(
+                    logMarker,
+                    s"""handleFSEventMessage for app id $appId skipping as header "variable_sip_bye_h_X-CH-ByeReason" missing
+                       |>> TYPE
+                       |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                       |>> HEADERS
+                       |${eventMessage.headers
+                      .map(h => h._1 + " : " + h._2)
+                      .mkString(space, "\n" + space, "")}
+                       |>> BODY
+                       |${eventMessage.body}
+                       |>> MAP is below
+                       |${eventMap
+                      .map({ item =>
+                        s"""appId: ${item._1}
+                           |command
+                           |${item._2.command}""".stripMargin
+                      })
+                      .mkString("\n")}""".stripMargin
+                  )
+                }
+                case _ => {
+                  commandToQueue.executeComplete.complete(Success(eventMessage))
+                  eventMap.remove(commandToQueue.command.eventUuid)
+                  adapter.info(
+                    logMarker,
+                    s"""handleFSEventMessage for app id $appId Removing entry
+                       |>> TYPE
+                       |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                       |>> HEADERS
+                       |${eventMessage.headers
+                      .map(h => h._1 + " : " + h._2)
+                      .mkString(space, "\n" + space, "")}
+                       |>> BODY
+                       |${eventMessage.body}
+                       |>> MAP is below
+                       |${eventMap
+                      .map({ item =>
+                        s"""appId: ${item._1}
+                           |command
+                           |${item._2.command}""".stripMargin
+                      })
+                      .mkString("\n")}""".stripMargin
+                  )
+                }
+              }
+
+
             } else {
               adapter.warning(
                 logMarker,
@@ -587,7 +616,6 @@ abstract class FSConnection extends StrictLogging {
         )
       }
     }
-
     eventMessage
   }
 
