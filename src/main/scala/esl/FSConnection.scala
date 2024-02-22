@@ -368,20 +368,6 @@ abstract class FSConnection extends StrictLogging {
             }
           }
           if (messagesWithDifferentId.nonEmpty) {
-            adapter.warning(
-              logMarker,
-              s"""CALL $callId FS-INTERFACE-ID $getConnectionId $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other calls
-                 |getOriginatedCallIds = ${getOriginatedCallIds
-                .mkString("[", ",", "]")}
-                 |other call ids ${messagesWithDifferentId
-                .map(_.headers(HeaderNames.uniqueId))
-                .mkString("[", ",", "]")}
-                 |
-                 |------  messages below -----
-                 |${messagesWithDifferentId
-                .map(freeSwitchMsgToString)
-                .mkString("\n----")}""".stripMargin
-            )
             val relatedChannels = messagesWithDifferentId.flatMap({
               case e: EventMessage
                   if e.eventName.exists(
@@ -401,6 +387,20 @@ abstract class FSConnection extends StrictLogging {
               relatedChannels.distinct.foreach(setOriginatedCallIds)
               filterFSMessages(fSData)
             } else {
+              adapter.warning(
+                logMarker,
+                s"""CALL $callId FS-INTERFACE-ID $getConnectionId $connectionId socket has received ${messagesWithDifferentId.length} message(s) from other calls
+                   |getOriginatedCallIds = ${getOriginatedCallIds
+                  .mkString("[", ",", "]")}
+                   |other call ids ${messagesWithDifferentId
+                  .flatMap(_.headers.get(HeaderNames.uniqueId))
+                  .mkString("[", ",", "]")}
+                   |
+                   |------  messages below -----
+                   |${messagesWithDifferentId
+                  .map(freeSwitchMsgToString)
+                  .mkString("\n----")}""".stripMargin
+              )
               fSData.copy(fsMessages = messagesWithSameId)
             }
           } else {
