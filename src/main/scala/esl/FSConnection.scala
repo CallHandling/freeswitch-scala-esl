@@ -42,6 +42,8 @@ import java.util.UUID
 import akka.event.{LogMarker, MarkerLoggingAdapter}
 import com.typesafe.scalalogging.StrictLogging
 
+import scala.annotation.tailrec
+
 abstract class FSConnection extends StrictLogging {
   self =>
   lazy private[this] val parser: Parser = DefaultParser
@@ -342,6 +344,11 @@ abstract class FSConnection extends StrictLogging {
          |$space${msg.body.getOrElse("NA")}""".stripMargin
     }
 
+    def isEventAllowedForID(uniqueIdHeaderValue: String) = {
+      uniqueIdHeaderValue == getConnectionId || getOriginatedCallIds
+        .contains(uniqueIdHeaderValue)
+    }
+
     Flow[FSData]
       .statefulMapConcat(() => {
         var hasConnected: Boolean = false
@@ -350,15 +357,14 @@ abstract class FSConnection extends StrictLogging {
         val buffer: mutable.ListBuffer[FSData] =
           mutable.ListBuffer.empty[FSData]
 
+        @tailrec
         def filterFSMessages(fSData: FSData): FSData = {
+
           val (messagesWithSameId, messagesWithDifferentId) = {
             fSData.fsMessages.partition { message =>
               message.headers
                 .get(HeaderNames.uniqueId)
-                .fold(true)(uniqueIdHeaderValue =>
-                  uniqueIdHeaderValue == getConnectionId || getOriginatedCallIds
-                    .contains(uniqueIdHeaderValue)
-                )
+                .exists(isEventAllowedForID)
             }
           }
           if (messagesWithDifferentId.nonEmpty) {
@@ -376,8 +382,30 @@ abstract class FSConnection extends StrictLogging {
                 .map(freeSwitchMsgToString)
                 .mkString("\n----")}""".stripMargin
             )
+            val relatedChannels = messagesWithDifferentId.flatMap({
+              case e: EventMessage
+                  if e.eventName.exists(
+                    _.name == EventNames.ChannelOriginate.name
+                  ) && e.channelCallUUID
+                    .exists(isEventAllowedForID) && e.headers
+                    .get(HeaderNames.CallerContext)
+                    .fold(false)(_ == "transfer_handler") && e.headers
+                    .get(HeaderNames.originatorChannel)
+                    .exists(isEventAllowedForID) => {
+                e.uuid.filterNot(isEventAllowedForID).toList
+              }
+              case _ => Nil
+            })
+
+            if (relatedChannels.nonEmpty) {
+              relatedChannels.distinct.foreach(setOriginatedCallIds)
+              filterFSMessages(fSData)
+            } else {
+              fSData.copy(fsMessages = messagesWithSameId)
+            }
+          } else {
+            fSData.copy(fsMessages = messagesWithSameId)
           }
-          fSData.copy(fsMessages = messagesWithSameId)
         }
 
         fSData => {
