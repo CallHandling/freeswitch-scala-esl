@@ -374,7 +374,7 @@ abstract class FSConnection extends StrictLogging {
                  |getOriginatedCallIds = ${getOriginatedCallIds
                 .mkString("[", ",", "]")}
                  |other call ids ${messagesWithDifferentId
-                .map(_.headers(HeaderNames.uniqueId))
+                .flatMap(_.headers.get(HeaderNames.uniqueId))
                 .mkString("[", ",", "]")}
                  |
                  |------  messages below -----
