@@ -316,12 +316,13 @@ abstract class FSConnection extends StrictLogging {
             (
               fsData
                 .copy(fsMessages = fsData.fsMessages.dropWhile(_ == command)),
-              true
+              true,
+              Some(command)
             )
           } else {
-            (fsData, isLingering)
+            (fsData, isLingering, Option.empty)
           }
-        case _ => (fsData, isLingering)
+        case _ => (fsData, isLingering, Option.empty)
       }
     }
 
@@ -408,6 +409,24 @@ abstract class FSConnection extends StrictLogging {
           }
         }
 
+        def fsDataToString(fSData: FSData) = {
+          fSData.fsMessages
+            .map({
+              msg =>
+                s"""
+                   |----------------------------------------------
+                   |>> HEADERS
+                   |${msg.headers
+                  .map(h => h._1 + " : " + h._2)
+                  .mkString(space, "\n" + space, "")}
+                   |>> BODY
+                   |${msg.body}
+                   |
+                   |""".stripMargin
+            })
+            .mkString("")
+        }
+
         fSData => {
           lazy val cmdReplies = getCmdReplies(fSData)
           lazy val isConnect = cmdReplies.foldLeft(false)((_, b) =>
@@ -417,6 +436,11 @@ abstract class FSConnection extends StrictLogging {
           val updatedFSData = {
             if (!hasConnected && !isConnect) {
               buffer.append(fSData)
+              adapter.info(
+                logMarker,
+                s"""fsData received msgs from freeswitch not connected and is not connect so will buffer
+                   |${fsDataToString(fSData)}""".stripMargin
+              )
               fSData.copy(fsMessages = Nil)
             } else if (!hasConnected && isConnect) {
               val con = connectToFS(fSData, hasConnected)
@@ -426,9 +450,18 @@ abstract class FSConnection extends StrictLogging {
                   buffer.flatMap(_.fsMessages).toList ++ fSData.fsMessages
                 )
                 buffer.clear()
+                adapter.info(
+                  logMarker,
+                  s"""fsData received msgs from freeswitch NOW CONNECTED So will flush buffer""".stripMargin
+                )
                 filterFSMessages(allMessages)
               } else {
                 buffer.append(con._1)
+                adapter.info(
+                  logMarker,
+                  s"""fsData received msgs from freeswitch not connected and is connect but didnt connect so will buffer
+                     |${fsDataToString(con._1)}""".stripMargin
+                )
                 fSData.copy(fsMessages = Nil)
               }
             } else if (
@@ -440,6 +473,19 @@ abstract class FSConnection extends StrictLogging {
             ) {
               val ling = doLinger(fSData, isLingering)
               isLingering = ling._2
+              ling._3.foreach {
+                msg =>
+                  adapter.info(
+                    logMarker,
+                    s"""fsData filtered out linger
+                     |>> HEADERS
+                     |${msg.headers
+                      .map(h => h._1 + " : " + h._2)
+                      .mkString(space, "\n" + space, "")}
+                     |>> BODY
+                     |${msg.body}""".stripMargin
+                  )
+              }
               filterFSMessages(ling._1)
             } else {
               filterFSMessages(fSData)
@@ -466,12 +512,61 @@ abstract class FSConnection extends StrictLogging {
     */
   private def handleFSMessage(fSMessage: FSMessage): FSMessage =
     fSMessage match {
-      case cmdReply: CommandReply => handleCommandReplyMessage(cmdReply)
-      case apiResponse: ApiResponse =>
+      case cmdReply: CommandReply => {
+        adapter.info(
+          logMarker,
+          s"""handleFSEventMessage received CommandReply
+             |>> HEADERS
+             |${cmdReply.headers
+            .map(h => h._1 + " : " + h._2)
+            .mkString(space, "\n" + space, "")}
+             |>> BODY
+             |${cmdReply.body}""".stripMargin
+        )
+        handleCommandReplyMessage(cmdReply)
+      }
+      case apiResponse: ApiResponse => {
+        adapter.info(
+          logMarker,
+          s"""handleFSEventMessage received ApiResponse
+             |ERROR : ${apiResponse.errorMessage}
+             |>> HEADERS
+             |${apiResponse.headers
+            .map(h => h._1 + " : " + h._2)
+            .mkString(space, "\n" + space, "")}
+             |>> BODY
+             |${apiResponse.body}""".stripMargin
+        )
         apiResponse //TODO Will implement logic for handle an api response
-      case eventMessage: EventMessage => handleFSEventMessage(eventMessage)
-      case basicMessage: BasicMessage =>
+      }
+      case eventMessage: EventMessage => {
+        adapter.info(
+          logMarker,
+          s"""handleFSEventMessage received EventMessage
+             |>> TYPE
+             |EVENT ${eventMessage.eventName.getOrElse("NA")}
+             |>> HEADERS
+             |${eventMessage.headers
+            .map(h => h._1 + " : " + h._2)
+            .mkString(space, "\n" + space, "")}
+             |>> BODY
+             |${eventMessage.body}""".stripMargin
+        )
+        handleFSEventMessage(eventMessage)
+      }
+      case basicMessage: BasicMessage => {
+        adapter.info(
+          logMarker,
+          s"""handleFSEventMessage received BasicMessage
+             |>> HEADERS
+             |${basicMessage.headers
+            .map(h => h._1 + " : " + h._2)
+            .mkString(space, "\n" + space, "")}
+             |>> BODY
+             |${basicMessage.body}""".stripMargin
+        )
         basicMessage //TODO Will implement logic for handle the basic message
+      }
     }
 
   /**
@@ -514,12 +609,23 @@ abstract class FSConnection extends StrictLogging {
       case Some(appId) => {
         eventMap.get(appId) match {
           case Some(commandToQueue) => {
-            if (eventMessage.eventName.contains(EventNames.ChannelExecute))
+            if (eventMessage.eventName.contains(EventNames.ChannelExecute)) {
               commandToQueue.executeEvent.complete(Success(eventMessage))
-            else if (
+              adapter.info(
+                logMarker,
+                s"""handleFSEventMessage for app id $appId completed process future
+                   |>> TYPE
+                   |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                   |>> HEADERS
+                   |${eventMessage.headers
+                  .map(h => h._1 + " : " + h._2)
+                  .mkString(space, "\n" + space, "")}
+                   |>> BODY
+                   |${eventMessage.body}""".stripMargin
+              )
+            } else if (
               eventMessage.eventName.contains(EventNames.ChannelExecuteComplete)
             ) {
-
               commandToQueue.command match {
                 case bridge: Bridge
                     if !eventMessage.headers.contains(
@@ -535,15 +641,7 @@ abstract class FSConnection extends StrictLogging {
                       .map(h => h._1 + " : " + h._2)
                       .mkString(space, "\n" + space, "")}
                        |>> BODY
-                       |${eventMessage.body}
-                       |>> MAP is below
-                       |${eventMap
-                      .map({ item =>
-                        s"""appId: ${item._1}
-                           |command
-                           |${item._2.command}""".stripMargin
-                      })
-                      .mkString("\n")}""".stripMargin
+                       |${eventMessage.body}""".stripMargin
                   )
                 }
                 case _ => {
