@@ -364,7 +364,7 @@ abstract class FSConnection extends StrictLogging {
             fSData.fsMessages.partition { message =>
               message.headers
                 .get(HeaderNames.uniqueId)
-                .exists(isEventAllowedForID)
+                .fold(true)(isEventAllowedForID)
             }
           }
           if (messagesWithDifferentId.nonEmpty) {
@@ -393,7 +393,7 @@ abstract class FSConnection extends StrictLogging {
                    |getOriginatedCallIds = ${getOriginatedCallIds
                   .mkString("[", ",", "]")}
                    |other call ids ${messagesWithDifferentId
-                  .flatMap(_.headers.get(HeaderNames.uniqueId))
+                  .map(_.headers(HeaderNames.uniqueId))
                   .mkString("[", ",", "]")}
                    |
                    |------  messages below -----
@@ -521,7 +521,10 @@ abstract class FSConnection extends StrictLogging {
             ) {
 
               commandToQueue.command match {
-                case bridge: Bridge if !eventMessage.headers.contains("variable_sip_bye_h_X-CH-ByeReason") => {
+                case bridge: Bridge
+                    if !eventMessage.headers.contains(
+                      "variable_sip_bye_h_X-CH-ByeReason"
+                    ) => {
                   adapter.info(
                     logMarker,
                     s"""handleFSEventMessage for app id $appId skipping as header "variable_sip_bye_h_X-CH-ByeReason" missing
@@ -568,7 +571,6 @@ abstract class FSConnection extends StrictLogging {
                   )
                 }
               }
-
 
             } else {
               adapter.warning(
