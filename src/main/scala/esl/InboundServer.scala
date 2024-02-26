@@ -28,6 +28,7 @@ import esl.FSConnection.{FSData, FSSocket}
 import java.util.UUID
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
+import scala.util.Try
 
 object InboundServer {
   private val address = "freeswitch.inbound.address"
@@ -35,6 +36,7 @@ object InboundServer {
   private val fsTimeout = "freeswitch.inbound.startup.timeout"
   private val linger = "freeswitch.outbound.linger"
   private val debugLogs = "freeswitch.logs.debug"
+  private val silentTransferContext = "freeswitch.transfer-by-refer.context"
   private val defaultTimeout = Duration(5, SECONDS)
 
   /**
@@ -66,13 +68,21 @@ object InboundServer {
       port: Int,
       timeout: FiniteDuration = defaultTimeout,
       linger: Boolean = true,
-      enableDebugLogs: Boolean = false
+      enableDebugLogs: Boolean = false,
+      transferByReferContext: Option[String] = Option.empty
   )(implicit
       system: ActorSystem,
       materializer: Materializer,
       adapter: MarkerLoggingAdapter
   ): InboundServer =
-    new InboundServer(interface, port, timeout, linger, enableDebugLogs)
+    new InboundServer(
+      interface,
+      port,
+      timeout,
+      linger,
+      enableDebugLogs,
+      transferByReferContext
+    )
 
 }
 
@@ -81,7 +91,8 @@ class InboundServer(
     port: Int,
     timeout: FiniteDuration,
     linger: Boolean,
-    enableDebugLogs: Boolean
+    enableDebugLogs: Boolean,
+    transferByReferContext: Option[String] = Option.empty
 )(implicit
     system: ActorSystem,
     materializer: Materializer,
@@ -101,7 +112,10 @@ class InboundServer(
       config.getBoolean(InboundServer.linger),
       config.hasPath(InboundServer.debugLogs) && config.getBoolean(
         InboundServer.debugLogs
-      )
+      ),
+      Try {
+        config.getString(InboundServer.silentTransferContext)
+      }.toOption
     )
 
   /**
@@ -137,10 +151,13 @@ class InboundServer(
     * @param fun      function will get freeswitch outbound connection after injecting sink
     * @return Future[(UpSourceCompletionFuture, DownStreamCompletionFuture)]
     */
-  def connect[Mat](password: String)(
+  def connect[Mat](
+      password: String
+  )(
       fun: (String, Future[FSSocket[InboundFSConnection]]) => Sink[FSData, Mat]
   ): Future[(Future[Done], Future[Mat])] = {
-    val fsConnection = InboundFSConnection(enableDebugLogs)
+    val fsConnection =
+      InboundFSConnection(enableDebugLogs, transferByReferContext)
     fsConnection.connect(password).map { _ =>
       val callId = UUID.randomUUID().toString
 

@@ -23,7 +23,10 @@ import esl.domain.CallCommands._
 
 import scala.concurrent.Future
 
-case class OutboundFSConnection(enableDebugLogs: Boolean)(implicit
+case class OutboundFSConnection(
+    enableDebugLogs: Boolean,
+    transferByReferContext: Option[String] = Option.empty
+)(implicit
     actorSystem: ActorSystem,
     actorMaterializer: Materializer,
     adapterIn: MarkerLoggingAdapter
