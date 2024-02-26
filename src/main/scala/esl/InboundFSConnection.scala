@@ -25,7 +25,10 @@ import esl.domain.CallCommands.AuthCommand
 
 import scala.concurrent.Future
 
-case class InboundFSConnection(enableDebugLogs: Boolean)(implicit
+case class InboundFSConnection(
+    enableDebugLogs: Boolean,
+    transferByReferContext: Option[String] = Option.empty
+)(implicit
     actorSystem: ActorSystem,
     actorMaterializer: Materializer,
     adapterIn: MarkerLoggingAdapter

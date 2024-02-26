@@ -44,7 +44,7 @@ import scala.concurrent.duration.{
   SECONDS
 }
 import scala.concurrent.{Future, Promise}
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 object OutboundServer {
 
@@ -79,6 +79,7 @@ object OutboundServer {
   private val fsTimeout = "freeswitch.outbound.startup.timeout"
   private val linger = "freeswitch.outbound.linger"
   private val debugLogs = "freeswitch.logs.debug"
+  private val silentTransferContext = "freeswitch.transfer-by-refer.context"
   private val defaultTimeout = Duration(5, SECONDS)
 
   /**
@@ -110,13 +111,21 @@ object OutboundServer {
       port: Int,
       timeout: FiniteDuration = defaultTimeout,
       linger: Boolean = true,
-      enableDebugLogs: Boolean = false
+      enableDebugLogs: Boolean = false,
+      transferByReferContext: Option[String] = None
   )(implicit
       system: ActorSystem,
       materializer: Materializer,
       adapter: MarkerLoggingAdapter
   ): OutboundServer =
-    new OutboundServer(interface, port, timeout, linger, enableDebugLogs)
+    new OutboundServer(
+      interface,
+      port,
+      timeout,
+      linger,
+      enableDebugLogs,
+      transferByReferContext
+    )
 
 }
 
@@ -125,7 +134,8 @@ class OutboundServer(
     port: Int,
     timeout: FiniteDuration,
     linger: Boolean,
-    enableDebugLogs: Boolean
+    enableDebugLogs: Boolean,
+    transferByReferContext: Option[String] = None
 )(implicit
     system: ActorSystem,
     materializer: Materializer,
@@ -150,7 +160,10 @@ class OutboundServer(
       config.getBoolean(OutboundServer.linger),
       config.hasPath(OutboundServer.debugLogs) && config.getBoolean(
         OutboundServer.debugLogs
-      )
+      ),
+      Try {
+        config.getString(OutboundServer.silentTransferContext)
+      }.toOption
     )
 
   /** This function will start a tcp server with given Sink. any free switch messages materialize to given sink.
@@ -193,7 +206,8 @@ class OutboundServer(
   ): Future[Tcp.ServerBinding] = {
 
     val sink = Sink.foreach[IncomingConnection] { connection =>
-      val fsConnection = OutboundFSConnection(enableDebugLogs)
+      val fsConnection =
+        OutboundFSConnection(enableDebugLogs, transferByReferContext)
       fsConnection.connect().map { _ =>
         val callId = UUID.randomUUID().toString
 
