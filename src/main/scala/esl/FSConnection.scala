@@ -55,6 +55,9 @@ abstract class FSConnection extends StrictLogging {
   private[this] var originatedCallIds: mutable.Set[String] =
     mutable.Set.empty[String]
 
+  private[this] var silentCallOriginators: Seq[SilentTransfers] =
+    Seq.empty[SilentTransfers]
+
   def enableDebugLogs: Boolean
 
   private[this] var connectionId: String =
@@ -63,6 +66,10 @@ abstract class FSConnection extends StrictLogging {
   def getOriginatedCallIds: mutable.Set[String] = originatedCallIds
 
   def setOriginatedCallIds(uuid: String): Unit = originatedCallIds.add(uuid)
+
+  def setTransferedChannelId(originator: String)(uuid: String): Unit = {
+    setOriginatedCallIds(uuid)
+  }
 
   def getConnectionId: String = connectionId
 
@@ -167,7 +174,7 @@ abstract class FSConnection extends StrictLogging {
             val fsPacket = data.utf8String
             val (messages, buffer) = parser.parse(unParsedBuffer + fsPacket)
             unParsedBuffer = buffer
-            List(FSData(self, messages))
+            List(FSData(self, messages.reverse))
           } catch {
             case e: Exception => {
               adapter.error(logMarker, e.getMessage, e)
@@ -370,22 +377,49 @@ abstract class FSConnection extends StrictLogging {
           }
           if (messagesWithDifferentId.nonEmpty) {
             val relatedChannels = messagesWithDifferentId.flatMap({
-              case e: EventMessage
-                  if e.eventName.exists(
-                    _.name == EventNames.ChannelOriginate.name
-                  ) && e.channelCallUUID
-                    .exists(isEventAllowedForID) && e.headers
-                    .get(HeaderNames.CallerContext)
-                    .fold(false)(_ == "transfer_handler") && e.headers
-                    .get(HeaderNames.originatorChannel)
-                    .exists(isEventAllowedForID) => {
-                e.uuid.filterNot(isEventAllowedForID).toList
+              case eventMessage: EventMessage
+                  if eventMessage.eventName
+                    .exists(_.name == EventNames.ChannelOriginate.name) &&
+                    eventMessage
+                      .getHeader(HeaderNames.CallerContext)
+                      .contains("transfer_handler") && !eventMessage.uuid
+                    .forall(isEventAllowedForID) => {
+
+                /*variable_sip_to_user : %2B441134672868
+                 * variable_endpoint_disposition : BLIND_TRANSFER
+                 * variable_transfer_destination : blind%3A02081234138
+                 * */
+                (
+                  eventMessage.getVariable("sip_h_Referred-By"),
+                  eventMessage.getVariable("originating_leg_uuid"),
+                  eventMessage.uuid
+                ) match {
+                  case (
+                        Some(referedByHeader),
+                        Some(originatorHeader),
+                        Some(toHeader)
+                      ) => {
+
+                    if (
+                      silentCallOriginators.exists(s =>
+                        (originatorHeader == s.originator) && s.referedBy
+                          .contains(referedByHeader)
+                      )
+                    ) {
+                      (originatorHeader -> toHeader) :: Nil
+                    } else Nil
+                  }
+                  case _ => Nil
+                }
+
               }
               case _ => Nil
             })
 
             if (relatedChannels.nonEmpty) {
-              relatedChannels.distinct.foreach(setOriginatedCallIds)
+              relatedChannels.distinct.foreach(e =>
+                setTransferedChannelId(e._1)(e._2)
+              )
               filterFSMessages(fSData)
             } else {
               adapter.warning(
@@ -605,6 +639,96 @@ abstract class FSConnection extends StrictLogging {
     */
   private def handleFSEventMessage(eventMessage: EventMessage): EventMessage = {
 
+    eventMessage.eventName.foreach({
+      case EventNames.ChannelHangupComplete => {
+        /*variable_sip_to_user : %2B441134672868
+         * variable_endpoint_disposition : BLIND_TRANSFER
+         * variable_transfer_destination : blind%3A02081234138
+         * */
+        (
+          eventMessage.getVariable("endpoint_disposition"),
+          eventMessage.getVariable("transfer_destination"),
+          eventMessage.otherLegUUID,
+          eventMessage.uuid
+        ) match {
+          case (
+                Some("BLIND_TRANSFER"),
+                Some(td),
+                Some(originator),
+                Some(from)
+              ) if td.startsWith("blind%3A") => {
+            val silentTransfers = SilentTransfers(
+              originator = originator,
+              from = Some(from),
+              toUri = Some(td.drop("blind%3A".length))
+            )
+            silentCallOriginators = silentCallOriginators :+ silentTransfers
+
+            adapter.info(
+              logMarker,
+              s"""handleFSEventMessage hangup complete treated as transfer (step 1/4)
+                 |originator ${silentTransfers.originator} from ${silentTransfers.from} toUri ${silentTransfers.toUri}
+                 |>> TYPE
+                 |EVENT ${eventMessage.eventName}
+                 |>> HEADERS
+                 |${eventMessage.headers
+                .map(h => h._1 + " : " + h._2)
+                .mkString(space, "\n" + space, "")}
+                 |>> BODY
+                 |${eventMessage.body}""".stripMargin
+            )
+          }
+          case _ =>
+        }
+      }
+      case EventNames.ChannelOriginate
+          if eventMessage
+            .getHeader(HeaderNames.CallerContext)
+            .contains("transfer_handler") && eventMessage.headers
+            .contains("sip_h_Referred-By") => {
+
+        val referedByHeader = eventMessage.getVariable("sip_h_Referred-By")
+        /*variable_sip_to_user : %2B441134672868
+         * variable_endpoint_disposition : BLIND_TRANSFER
+         * variable_transfer_destination : blind%3A02081234138
+         * */
+        (
+          referedByHeader,
+          eventMessage.getVariable("originating_leg_uuid"),
+          eventMessage.uuid
+        ) match {
+          case (
+                Some(referedByHeader),
+                Some(originatorHeader),
+                Some(toHeader)
+              ) => {
+
+            silentCallOriginators = silentCallOriginators.map({
+              case s @ SilentTransfers(originator, _, _, _, Some(referedBy))
+                  if (originatorHeader == originator) && referedBy == referedByHeader => {
+                adapter.info(
+                  logMarker,
+                  s"""handleFSEventMessage channel originate treated as transfer (step 3/4)
+                     |originator ${s.originator} from ${s.from} to ${toHeader} toUri ${s.toUri} referedBy ${referedBy}
+                     |>> TYPE
+                     |EVENT ${eventMessage.eventName}
+                     |>> HEADERS
+                     |${eventMessage.headers
+                    .map(h => h._1 + " : " + h._2)
+                    .mkString(space, "\n" + space, "")}
+                     |>> BODY
+                     |${eventMessage.body}""".stripMargin
+                )
+                s.copy(to = Some(toHeader))
+              }
+              case s => s
+            })
+          }
+          case _ =>
+        }
+      }
+    })
+
     eventMessage.applicationUuid match {
       case Some(appId) => {
         eventMap.get(appId) match {
@@ -626,11 +750,55 @@ abstract class FSConnection extends StrictLogging {
             } else if (
               eventMessage.eventName.contains(EventNames.ChannelExecuteComplete)
             ) {
-              commandToQueue.command match {
-                case bridge: Bridge
+              (commandToQueue.command,eventMessage.getVariable("sip_h_Referred-By")) match {
+                case (bridge: Bridge, Some(referedBy))
                     if !eventMessage.headers.contains(
                       "variable_sip_bye_h_X-CH-ByeReason"
                     ) => {
+
+                  /*
+                   * variable_sip_refer_to : %3Csip%3A02081234138%40sips.svc.stg.hubbub.ai%3E
+                   * variable_sip_h_Referred-By : %3Csip%3A%2B441134672868%40172.50.52.212%3A5062%3E
+                   * */
+                  Some(
+                    (
+                      eventMessage.uuid,
+                      eventMessage.getVariable("bridge_uuid")
+                    )
+                  ).foreach {
+                    case (
+                          Some(channelUuid),
+                          Some(bridgeUuid)
+                        ) => {
+                      silentCallOriginators = silentCallOriginators.map({
+                        case s @ SilentTransfers(
+                              originator,
+                              Some(from),
+                              _,
+                              _,
+                              _
+                            )
+                            if (channelUuid == originator) && bridgeUuid == from => {
+                          adapter.info(
+                            logMarker,
+                            s"""handleFSEventMessage ChannelExecuteComplete treated  as transfer (step 2/4)
+                               |originator ${s.originator} from ${s.from} toUri ${s.toUri} referedBy ${referedBy}
+                               |>> TYPE
+                               |EVENT ${eventMessage.eventName}
+                               |>> HEADERS
+                               |${eventMessage.headers
+                              .map(h => h._1 + " : " + h._2)
+                              .mkString(space, "\n" + space, "")}
+                               |>> BODY
+                               |${eventMessage.body}""".stripMargin
+                          )
+                          s.copy(referedBy = Some(referedBy))
+                        }
+                        case s => s
+                      })
+                    }
+                  }
+
                   adapter.info(
                     logMarker,
                     s"""handleFSEventMessage for app id $appId skipping as header "variable_sip_bye_h_X-CH-ByeReason" missing
@@ -686,23 +854,96 @@ abstract class FSConnection extends StrictLogging {
             }
           }
           case _ => {
-            adapter.warning(
-              logMarker,
-              s"""handleFSEventMessage for app id $appId Unable to find Command in look up
-                 |>> TYPE
-                 |EVENT ${eventMessage.eventName}
-                 |>> HEADERS
-                 |${eventMessage.headers
-                .map(h => h._1 + " : " + h._2)
-                .mkString(space, "\n" + space, "")}
-                 |>> BODY
-                 |${eventMessage.body}""".stripMargin
-            )
+            if (
+              eventMessage.eventName.contains(
+                EventNames.ChannelExecuteComplete
+              ) && eventMessage.application.contains("bridge") && eventMessage
+                .getHeader(HeaderNames.CallerContext)
+                .contains("transfer_handler")
+            ) {
+              /*variable_sip_refer_to : %3Csip%3A02081234138%40sips.svc.stg.hubbub.ai%3E
+               * variable_originated_legs : ARRAY%3A%3A7b19e812-64b7-4740-a76c-17128711b4b5%3BOutbound%20Call%3B%2B441134672868%7C%3Afc773c9b-f3ca-4304-acc4-3f74d3e276b7%3BOutbound%20Call%3B02081234138
+               * variable_sip_to_user : %2B441134672868
+               * variable_sip_h_Referred-By : %3Csip%3A%2B441134672868%40172.50.52.212%3A5062%3E
+               *
+               * */
+              (
+                eventMessage.uuid,
+                eventMessage.getVariable("originated_legs"),
+                eventMessage.getVariable("bridge_uuid")
+              ) match {
+                case (Some(channelUuid), originatedLegs, Some(bridgeUuid)) => {
+                  silentCallOriginators.collectFirst({
+                    case SilentTransfers(originator, Some(from), Some(to), _, _)
+                        if (channelUuid == originator) && bridgeUuid == to && originatedLegs
+                          .fold(false)(l =>
+                            l.contains(from) && l.contains(to)
+                          ) => {
+                      eventMap.collectFirst({
+                        case (
+                              appId,
+                              CommandToQueue(bridge: Bridge, _, executeComplete)
+                            )
+                            if bridge.targets.exists(
+                              _.contains(s"origination_uuid=$from")
+                            ) => {
+                          executeComplete.complete(Success(eventMessage))
+                          eventMap.remove(appId)
+                          adapter.info(
+                            logMarker,
+                            s"""handleFSEventMessage for ChannelExecuteComplete trated as transfer (step 4/4)
+                               |executed executeComplete promise and Removing entry for app id $appId
+                               |>> TYPE
+                               |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                               |>> HEADERS
+                               |${eventMessage.headers
+                              .map(h => h._1 + " : " + h._2)
+                              .mkString(space, "\n" + space, "")}
+                               |>> BODY
+                               |${eventMessage.body}
+                               |""".stripMargin
+                          )
+                        }
+                      })
+                    }
+                  })
+                }
+                case _ => {
+                  adapter.warning(
+                    logMarker,
+                    s"""handleFSEventMessage for app id $appId Unable to find Command in look up (2) (headers not as expected for silent transfer)
+                       |>> TYPE
+                       |EVENT ${eventMessage.eventName}
+                       |>> HEADERS
+                       |${eventMessage.headers
+                      .map(h => h._1 + " : " + h._2)
+                      .mkString(space, "\n" + space, "")}
+                       |>> BODY
+                       |${eventMessage.body}""".stripMargin
+                  )
+                }
+              }
+            } else {
+              adapter.warning(
+                logMarker,
+                s"""handleFSEventMessage for app id $appId Unable to find Command in look up
+                   |>> TYPE
+                   |EVENT ${eventMessage.eventName}
+                   |>> HEADERS
+                   |${eventMessage.headers
+                  .map(h => h._1 + " : " + h._2)
+                  .mkString(space, "\n" + space, "")}
+                   |>> BODY
+                   |${eventMessage.body}""".stripMargin
+              )
+            }
+
           }
         }
       }
       case _ => {
-        adapter.debug(
+
+        adapter.warning(
           logMarker,
           s"""handleFSEventMessage Unable to find application id header for event message
              |>> TYPE
@@ -714,6 +955,7 @@ abstract class FSConnection extends StrictLogging {
              |>> BODY
              |${eventMessage.body}""".stripMargin
         )
+
       }
     }
     eventMessage
@@ -1240,6 +1482,14 @@ abstract class FSConnection extends StrictLogging {
 }
 
 object FSConnection {
+
+  case class SilentTransfers(
+      originator: String,
+      from: Option[String] = Option.empty,
+      to: Option[String] = Option.empty,
+      toUri: Option[String] = Option.empty,
+      referedBy: Option[String] = Option.empty
+  )
 
   sealed trait FSCommandPublication {
     def command: FSCommand

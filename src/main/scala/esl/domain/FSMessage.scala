@@ -121,6 +121,8 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
 
   val applicationUuid: Option[String] = headers.get(HeaderNames.applicationUuid)
 
+  val application: Option[String] = headers.get(HeaderNames.application)
+
   def getHeader(header: String): Option[String] = headers.get(header)
 
   def getVariable(variable: String): Option[String] = getHeader(s"variable_$variable")
