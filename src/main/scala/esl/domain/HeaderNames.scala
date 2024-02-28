@@ -44,6 +44,8 @@ object HeaderNames {
   val dtmfDigit = "DTMF-Digit"
   val destinationNumber = "Caller-Destination-Number"
   val callerNumber = "Caller-Caller-ID-Number"
+  val CallerContext = "Caller-Context"
+  val originatorChannel = "variable_originator"
 
   object Conference {
     val name = "Conference-Name"
