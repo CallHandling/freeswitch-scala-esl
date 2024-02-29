@@ -455,6 +455,7 @@ abstract class FSConnection extends StrictLogging {
 
         var authenticated = !isInbound
 
+        @tailrec
         def filterFSMessages(fSData: FSData): (FSData, List[FSMessage]) = {
           val (messagesWithSameId, messagesWithDifferentId) = {
             fSData.fsMessages.partition { message =>
