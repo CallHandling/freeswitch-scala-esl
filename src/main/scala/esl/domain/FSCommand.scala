@@ -216,9 +216,9 @@ object CallCommands {
   }
 
   final case class BridgeUuid(
-                           targets: List[String],
-                           config: ApplicationCommandConfig
-                         ) extends FSCommand {
+      targets: List[String],
+      config: ApplicationCommandConfig
+  ) extends FSCommand {
     override def toString: String =
       s"""bgapi uuid_bridge ${targets.mkString(" ")}
          |Job-UUID: $eventUuid$MESSAGE_TERMINATOR""".stripMargin
@@ -303,8 +303,11 @@ object CallCommands {
       }
     }
 
-    final case class SendConferenceCommand(memberId: Option[String], command: String, config: ApplicationCommandConfig)
-        extends ConferenceCommandType {
+    final case class SendConferenceCommand(
+        memberId: Option[String],
+        command: String,
+        config: ApplicationCommandConfig
+    ) extends ConferenceCommandType {
       override def toString: String =
         s"$command ${memberId match {
           case Some(id) => id
@@ -350,19 +353,18 @@ object CallCommands {
       listenCallId: String
   ) extends FSCommand {
     override def toString: String = {
-
-        if (bargeIn) {
-          s"""bgapi ${options.asOriginateCmd} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
+      if (bargeIn) {
+        s"""bgapi ${options.asOriginateCmd} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
              |Job-UUID: $eventUuid
              |
              |""".stripMargin
-        } else {
-          s"""bgapi ${options.asOriginateCmd} &eavesdrop($listenCallId)
+      } else {
+        s"""bgapi ${options.asOriginateCmd} &eavesdrop($listenCallId)
              |Job-UUID: $eventUuid
              |
              |""".stripMargin
-        }
       }
+    }
   }
 
   final case class Dial(
@@ -509,6 +511,33 @@ object CallCommands {
       s"bgapi create_uuid $eventUuid${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }
 
+  sealed trait DisplaceCommand
+  final case class StartPlay() extends DisplaceCommand {
+    override def toString: String = "start"
+  }
+  final case class StopPlay() extends DisplaceCommand {
+    override def toString: String = "stop"
+  }
+
+  final case class UuidDisplace(
+      target: String,
+      command: DisplaceCommand,
+      filePath: Option[String],
+      limit: Option[Int],
+      config: ApplicationCommandConfig
+  ) extends FSCommand {
+
+    override val eventUuid: String =
+      java.util.UUID.randomUUID.toString.replace("-", "")
+    override def toString: String = {
+      val fileOpt =  filePath.fold(""){file =>
+        val limitStr = limit.fold("")(l => s"limit $l")
+        s"${command.toString} $file $limitStr mux"
+      }
+      s"bgapi uuid_displace $target $fileOpt${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
+    }
+  }
+
   /**
     * Specify event types to listen for. Note, this is not a filter out but rather a "filter in," that is,
     * when a filter is applied only the filtered values are received. Multiple filters on a socket connection are allowed.
@@ -534,8 +563,7 @@ object CallCommands {
     *
     * @param uuid : Channel uuid to filter in
     */
-  final case class FilterUUId(uuid: String)
-      extends FSCommand {
+  final case class FilterUUId(uuid: String) extends FSCommand {
     override def toString: String =
       s"filter Unique-ID ${uuid}$MESSAGE_TERMINATOR"
   }
