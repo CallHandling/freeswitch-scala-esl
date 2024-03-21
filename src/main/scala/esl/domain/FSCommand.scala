@@ -216,9 +216,9 @@ object CallCommands {
   }
 
   final case class BridgeUuid(
-                           targets: List[String],
-                           config: ApplicationCommandConfig
-                         ) extends FSCommand {
+      targets: List[String],
+      config: ApplicationCommandConfig
+  ) extends FSCommand {
     override def toString: String =
       s"""bgapi uuid_bridge ${targets.mkString(" ")}
          |Job-UUID: $eventUuid$MESSAGE_TERMINATOR""".stripMargin
@@ -303,8 +303,11 @@ object CallCommands {
       }
     }
 
-    final case class SendConferenceCommand(memberId: Option[String], command: String, config: ApplicationCommandConfig)
-        extends ConferenceCommandType {
+    final case class SendConferenceCommand(
+        memberId: Option[String],
+        command: String,
+        config: ApplicationCommandConfig
+    ) extends ConferenceCommandType {
       override def toString: String =
         s"$command ${memberId match {
           case Some(id) => id
@@ -351,18 +354,18 @@ object CallCommands {
   ) extends FSCommand {
     override def toString: String = {
 
-        if (bargeIn) {
-          s"""bgapi ${options.asOriginateCmd} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
+      if (bargeIn) {
+        s"""bgapi ${options.asOriginateCmd} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
              |Job-UUID: $eventUuid
              |
              |""".stripMargin
-        } else {
-          s"""bgapi ${options.asOriginateCmd} &eavesdrop($listenCallId)
+      } else {
+        s"""bgapi ${options.asOriginateCmd} &eavesdrop($listenCallId)
              |Job-UUID: $eventUuid
              |
              |""".stripMargin
-        }
       }
+    }
   }
 
   final case class Dial(
@@ -381,7 +384,7 @@ object CallCommands {
     override lazy val args: String = {
 
       s"""dial_$eventUuid=$${
-         |bgapi ${options.asOriginateCmd} &park()
+         |bgapi ${options.asReplace} &park()
          |Job-UUID: $eventUuid
          |
          |
@@ -394,7 +397,7 @@ object CallCommands {
   final case class DialSession(options: DialConfig) extends FSCommand {
 
     override def toString: String =
-      s"""bgapi ${options.asOriginateCmd} &park()
+      s"""bgapi ${options.asReplace} &park()
          |Job-UUID: $eventUuid
          |
          |""".stripMargin
@@ -426,6 +429,23 @@ object CallCommands {
         s"originate ${vars.asVarsString}$target"
       }
 
+      def asReplace = {
+        val dialString = {
+          Map(
+            "destination" -> target,
+            "origination_uuid" -> uniqueId,
+            "originate_timeout" -> timeout.toSeconds.toString
+          ) ++ numberPresentation.asReplace ++ retries
+            .map(_.asReplace)
+            .getOrElse(Map.empty)
+        }.foldLeft(miscArgs)({
+          case (miscArgs, (key, replacement)) =>
+            miscArgs.replace(s"<<$key>>", replacement)
+        })
+
+        s"originate $dialString"
+      }
+
     }
 
     case class Retry(retries: Int = 1, sleep: FiniteDuration = 5 seconds) {
@@ -435,6 +455,12 @@ object CallCommands {
           s"originate_retry_sleep_ms=${sleep.toMillis}"
         )
       }
+
+      def asReplace: Map[String, String] =
+        Map(
+          "originate_retries" -> retries.toString,
+          "originate_retry_sleep_ms" -> sleep.toMillis.toString
+        )
     }
     case class NumberPresentation(number: String, name: String) {
       def asOriginateArgs: Seq[String] = {
@@ -443,6 +469,12 @@ object CallCommands {
           s"origination_caller_id_name=$name"
         )
       }
+
+      def asReplace: Map[String, String] =
+        Map(
+          "origination_caller_id_number" -> number,
+          "origination_caller_id_name" -> name
+        )
     }
 
     object NumberPresentation {
@@ -534,8 +566,7 @@ object CallCommands {
     *
     * @param uuid : Channel uuid to filter in
     */
-  final case class FilterUUId(uuid: String)
-      extends FSCommand {
+  final case class FilterUUId(uuid: String) extends FSCommand {
     override def toString: String =
       s"filter Unique-ID ${uuid}$MESSAGE_TERMINATOR"
   }
