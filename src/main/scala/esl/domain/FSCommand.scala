@@ -394,6 +394,35 @@ object CallCommands {
     }
   }
 
+  final case class DialSession(
+                         options: DialConfig,
+                         config: ApplicationCommandConfig
+                       ) extends FSExecuteApp {
+
+    override val application: String = "set"
+
+    /*override def toString: String =
+      s"""bgapi ${options.asOriginateCmd} &park()
+         |Job-UUID: $eventUuid
+         |
+         |""".stripMargin*/
+
+    override lazy val args: String = {
+
+      s"""dial_$eventUuid=$${
+         |bgapi ${options.asReplace} &park()
+         |Job-UUID: $eventUuid
+         |
+         |
+         |}
+         |
+         |""".stripMargin
+    }
+  }
+
+
+
+/*
   final case class DialSession(options: DialConfig) extends FSCommand {
 
     override def toString: String =
@@ -402,7 +431,7 @@ object CallCommands {
          |
          |""".stripMargin
 
-  }
+  }*/
 
   object Dial {
 
@@ -416,11 +445,8 @@ object CallCommands {
     ) {
       def asOriginateCmd = {
         val vars = Seq(
-          "ignore_early_media=false",
           s"originate_timeout=${timeout.toSeconds}",
-          s"origination_uuid=$uniqueId",
-          "dtmf_type=rfc2833",
-          "jitterbuffer_msec=2p:25p:,rtp_jitter_buffer_plc=true,rtp_jitter_buffer_during_bridge=true,suppress_cng=true,absolute_codec_string=^^:PCMA:PCMU:OPUS@8000h@20i"
+          s"origination_uuid=$uniqueId"
         ) ++
           numberPresentation.asOriginateArgs ++
           retries.map(_.asOriginateArgs).getOrElse(Nil) ++ {
