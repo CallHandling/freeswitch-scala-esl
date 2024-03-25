@@ -715,10 +715,17 @@ object CallCommands {
       s"bgapi uuid_hold off ${config.channelUuid}${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }
 
+  final case class Hold(config: ApplicationCommandConfig) extends FSCommand {
+    override def toString: String =
+      s"bgapi uuid_hold ${config.channelUuid}${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
+  }
+
+/*
   case class Hold(config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "hold"
     override val args: String = config.channelUuid
   }
+  */
 //  case class OffHold(config: ApplicationCommandConfig) extends FSExecuteApp {
 //    override val application: String = "unhold"
 //    override val args: String = config.channelUuid
