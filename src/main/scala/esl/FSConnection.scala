@@ -31,13 +31,7 @@ import esl.parser.{DefaultParser, Parser}
 
 import scala.collection.mutable
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
-import scala.concurrent.{
-  Await,
-  ExecutionContextExecutor,
-  Future,
-  Promise,
-  TimeoutException
-}
+import scala.concurrent.{Await, ExecutionContextExecutor, Future, Promise, TimeoutException}
 import scala.util.{Failure, Success, Try}
 import java.util.UUID
 import akka.event.{LogMarker, MarkerLoggingAdapter}
@@ -45,6 +39,7 @@ import com.typesafe.scalalogging.StrictLogging
 import esl.domain.CallCommands.ConferenceCommand.SendConferenceCommand
 import esl.domain.CallCommands.Dial.DialConfig
 
+import java.net.URLEncoder
 import scala.annotation.tailrec
 
 abstract class FSConnection extends StrictLogging {
@@ -951,6 +946,7 @@ abstract class FSConnection extends StrictLogging {
   private def handleFSEventMessage(
       eventMessage: EventMessage
   ): (EventMessage, Option[FSCommand]) = {
+    def encode(str: String): String = Try { URLEncoder.encode(str, "UTF-8") }.getOrElse(str)
 
     def completeAndRemoveFromMap(
         command: FSCommand,
@@ -1424,6 +1420,7 @@ abstract class FSConnection extends StrictLogging {
           ) && eventMessage.jobCommandArg.fold(false)(
             _.startsWith("off")
           )) || eventMessage.jobCommand.contains("conference")
+            || eventMessage.jobCommand.contains("uuid_displace")
         ) {
           commandToQueue.executeEvent.complete(Success(eventMessage))
           if (commandToQueue.executeComplete.isCompleted) {
@@ -1568,6 +1565,49 @@ abstract class FSConnection extends StrictLogging {
                 )
                 if eventMessage.eavesdropTarget
                   .fold(false)(_ == command.listenCallId) =>
+              executeComplete.complete(Success(eventMessage))
+              if (executeEvent.isCompleted) {
+                eventMap.remove(key)
+              }
+              command
+          })
+      }
+      case (_, _, _, Some(EventNames.MediaBugStop), _, _) => {
+        adapter.info(
+            logMarker,
+            s"""Channel call state event for callId
+               |${eventMessage.headers(HeaderNames.uniqueId)}
+               |>> MAP command is below
+               |${eventMap
+              .map({ item =>
+                s"""appId: ${item._1}
+                   |command
+                   |${item._2.command}
+                   |command type ${item._2.command.getClass}""".stripMargin
+              })
+              .mkString("\n")}
+              |media target from msg - ${eventMessage.eavesdropTarget}
+              |targets from command queue ${eventMap.map {
+              case (_, CommandToQueue(
+              command: UuidDisplace,
+              _,
+              _
+              )) => command.filePath
+              case _ => ""
+            }.mkString(" ")}""".stripMargin
+        )
+        eventMap
+          .collectFirst({
+            case (
+              key,
+              CommandToQueue(
+              command: UuidDisplace,
+              executeEvent,
+              executeComplete
+              )
+              )
+              if eventMessage.eavesdropTarget
+                .fold(false)(_.endsWith(encode(command.filePath.getOrElse("")))) =>
               executeComplete.complete(Success(eventMessage))
               if (executeEvent.isCompleted) {
                 eventMap.remove(key)
