@@ -585,9 +585,14 @@ object CallCommands {
     override val eventUuid: String =
       java.util.UUID.randomUUID.toString.replace("-", "")
     override def toString: String = {
-      val fileOpt =  filePath.fold(""){file =>
-        val limitStr = limit.fold("")(_.toString)
-        s"${command.toString} $file/moh $limitStr mux"
+      val limitStr = limit.fold("0")(_.toString)
+      val fileOpt =  command match {
+        case StartPlay() => filePath.fold(s"${command.toString} moh $limitStr mux") { file =>
+          s"${command.toString} $file $limitStr mux"
+        }
+        case StopPlay() => filePath.fold("") { file =>
+          s"${command.toString} $file"
+        }
       }
       s"bgapi uuid_displace $target $fileOpt${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
     }
