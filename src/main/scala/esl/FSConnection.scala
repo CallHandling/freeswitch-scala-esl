@@ -39,7 +39,7 @@ import com.typesafe.scalalogging.StrictLogging
 import esl.domain.CallCommands.ConferenceCommand.SendConferenceCommand
 import esl.domain.CallCommands.Dial.DialConfig
 
-import java.net.URLEncoder
+import java.net.{URLDecoder, URLEncoder}
 import scala.annotation.tailrec
 
 abstract class FSConnection extends StrictLogging {
@@ -946,7 +946,7 @@ abstract class FSConnection extends StrictLogging {
   private def handleFSEventMessage(
       eventMessage: EventMessage
   ): (EventMessage, Option[FSCommand]) = {
-    def encode(str: String): String = Try { URLEncoder.encode(str, "UTF-8") }.map(_.replace("%2F", "/")).getOrElse(str)
+    def decodeUriComponent(str: String): Option[String] = Try { URLDecoder.decode(str, "UTF-8") }.toOption
 
     def completeAndRemoveFromMap(
         command: FSCommand,
@@ -1584,7 +1584,8 @@ abstract class FSConnection extends StrictLogging {
               )
               )
               if eventMessage.eavesdropTarget
-                .fold(false)(_.endsWith(encode(command.filePath.getOrElse(""))))  && eventMessage.channelCallUUID.contains(command.target) =>
+                .fold(false)(t => decodeUriComponent(t).fold(false)(_.contains(command.filePath.getOrElse(""))))
+                  && eventMessage.channelCallUUID.contains(command.target) =>
               executeComplete.complete(Success(eventMessage))
               if (executeEvent.isCompleted) {
                 eventMap.remove(key)
