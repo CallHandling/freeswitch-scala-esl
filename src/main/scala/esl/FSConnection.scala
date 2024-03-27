@@ -946,7 +946,7 @@ abstract class FSConnection extends StrictLogging {
   private def handleFSEventMessage(
       eventMessage: EventMessage
   ): (EventMessage, Option[FSCommand]) = {
-    def encode(str: String): String = Try { URLEncoder.encode(str, "UTF-8") }.getOrElse(str)
+    def encode(str: String): String = Try { URLEncoder.encode(str, "UTF-8") }.map(_.replace("%2F", "/")).getOrElse(str)
 
     def completeAndRemoveFromMap(
         command: FSCommand,
@@ -1573,30 +1573,7 @@ abstract class FSConnection extends StrictLogging {
           })
       }
       case (_, _, _, Some(EventNames.MediaBugStop), _, _) => {
-        adapter.info(
-            logMarker,
-            s"""Channel call state event for callId
-               |${eventMessage.headers(HeaderNames.uniqueId)}
-               |>> MAP command is below
-               |${eventMap
-              .map({ item =>
-                s"""appId: ${item._1}
-                   |command
-                   |${item._2.command}
-                   |command type ${item._2.command.getClass}""".stripMargin
-              })
-              .mkString("\n")}
-              |media target from msg - ${eventMessage.eavesdropTarget}
-              |targets from command queue ${eventMap.map {
-              case (_, CommandToQueue(
-              command: UuidDisplace,
-              _,
-              _
-              )) => command.filePath
-              case _ => ""
-            }.mkString(" ")}""".stripMargin
-        )
-        eventMap
+        val command = eventMap
           .collectFirst({
             case (
               key,
@@ -1607,13 +1584,30 @@ abstract class FSConnection extends StrictLogging {
               )
               )
               if eventMessage.eavesdropTarget
-                .fold(false)(_.endsWith(encode(command.filePath.getOrElse("")))) =>
+                .fold(false)(_.endsWith(encode(command.filePath.getOrElse(""))))  && eventMessage.channelCallUUID.contains(command.target) =>
               executeComplete.complete(Success(eventMessage))
               if (executeEvent.isCompleted) {
                 eventMap.remove(key)
               }
               command
           })
+        adapter.info(
+          logMarker,
+          s"""Channel call state event for callId
+             |${eventMessage.headers(HeaderNames.uniqueId)}
+             |>> MAP command is below
+             |${eventMap
+            .map({ item =>
+              s"""appId: ${item._1}
+                 |command
+                 |${item._2.command}
+                 |command type ${item._2.command.getClass}""".stripMargin
+            })
+            .mkString("\n")}
+             |media target from msg - ${eventMessage.eavesdropTarget}
+             |targets from command queue ${command}""".stripMargin
+        )
+        command
       }
       case (_, _, _, Some(EventNames.ChannelBridge), _, _) => {
         eventMap
