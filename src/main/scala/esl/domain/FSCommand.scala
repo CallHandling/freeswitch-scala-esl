@@ -38,24 +38,28 @@ sealed trait FSExecuteApp extends FSCommand {
 
   override def toString: String = {
     val b = StringBuilder.newBuilder
-    if (application.nonEmpty) b.append(
-      s"sendmsg ${config.channelUuid}${LINE_TERMINATOR}Event-UUID: $eventUuid$LINE_TERMINATOR"
-    )
-    if (application.nonEmpty)
-      b.append(
-      s"call-command: execute${LINE_TERMINATOR}execute-app-name: $application$LINE_TERMINATOR"
-      )
-    if (application.nonEmpty && config.eventLock)
-      b.append(s"event-lock: ${config.eventLock}$LINE_TERMINATOR")
-    if (application.nonEmpty && config.loops > 1) b.append(s"loops: ${config.loops}$LINE_TERMINATOR")
-    if (application.nonEmpty && config.async) b.append(s"async: ${config.async}$LINE_TERMINATOR")
-    if (application.nonEmpty && args.length > 0)
-      b.append(
-        s"content-type: text/plain${LINE_TERMINATOR}content-length: ${args.length}$MESSAGE_TERMINATOR$args$LINE_TERMINATOR"
-      )
-    else b.append(
-      s"$args$LINE_TERMINATOR"
-    )
+    val hasApplication = application.nonEmpty
+
+    if (hasApplication) {
+      b.append(s"sendmsg ${config.channelUuid}$LINE_TERMINATOR")
+      b.append(s"Event-UUID: $eventUuid$LINE_TERMINATOR")
+      b.append(s"call-command: execute$LINE_TERMINATOR")
+      b.append(s"execute-app-name: $application$LINE_TERMINATOR")
+
+      if (config.eventLock)
+        b.append(s"event-lock: ${config.eventLock}$LINE_TERMINATOR")
+      if (config.loops > 1) b.append(s"loops: ${config.loops}$LINE_TERMINATOR")
+      if (config.async) b.append(s"async: ${config.async}$LINE_TERMINATOR")
+    }
+
+    if (hasApplication && args.nonEmpty) {
+      b.append(s"content-type: text/plain$LINE_TERMINATOR")
+      b.append(s"content-length: ${args.length}$MESSAGE_TERMINATOR")
+      b.append(args) // Assumes args is already a String
+    } else {
+      b.append(args) // Assumes args is already a String
+    }
+
     b.toString()
   }
 }
@@ -72,7 +76,8 @@ final case class ApplicationCommandConfig(
     channelUuid: String = "",
     eventLock: Boolean = false,
     loops: Int = 1,
-    async: Boolean = false
+    async: Boolean = false,
+    useSetVar: Boolean = false
 ) {
   def withChannelId(channelId: String): ApplicationCommandConfig =
     copy(channelUuid = channelId)
@@ -398,13 +403,13 @@ object CallCommands {
   }
 
   final case class DialSession(
-                         options: DialConfig,
-                         config: ApplicationCommandConfig
-                       ) extends FSExecuteApp {
+      options: DialConfig,
+      config: ApplicationCommandConfig
+  ) extends FSExecuteApp {
 
     override val application: String =
-      if (options.useBgApi) ""
-      else "set"
+      if (config.useSetVar) "set"
+      else ""
 
     /*override def toString: String =
       s"""bgapi ${options.asOriginateCmd} &park()
@@ -412,13 +417,7 @@ object CallCommands {
          |
          |""".stripMargin*/
 
-    override lazy val args: String = if (options.useBgApi) {
-      s"""bgapi ${options.asOriginateCmd} &park()
-         |Job-UUID: $eventUuid
-         |
-         |""".stripMargin
-    } else {
-
+    override lazy val args: String = if (!config.useSetVar) {
       s"""dial_$eventUuid=$${
          |bgapi ${options.asReplace} &park()
          |Job-UUID: $eventUuid
@@ -427,12 +426,15 @@ object CallCommands {
          |}
          |
          |""".stripMargin
+    } else {
+      s"""bgapi ${options.asReplace} &park()
+         |Job-UUID: $eventUuid
+         |
+         |""".stripMargin
     }
   }
 
-
-
-/*
+  /*
   final case class DialSession(options: DialConfig) extends FSCommand {
 
     override def toString: String =
@@ -451,8 +453,7 @@ object CallCommands {
         numberPresentation: Dial.NumberPresentation,
         timeout: FiniteDuration,
         retries: Option[Dial.Retry] = Option.empty,
-        miscArgs: String = "",
-        useBgApi: Boolean = false
+        miscArgs: String = ""
     ) {
       def asOriginateCmd = {
         val vars = Seq(
@@ -572,14 +573,10 @@ object CallCommands {
   final case class CreateUUID(config: ApplicationCommandConfig)
       extends FSCommand {
 
-    override val eventUuid: String = {
-      if (config.channelUuid.trim.isEmpty)
+    override val eventUuid: String =
       java.util.UUID.randomUUID.toString.replace("-", "")
-      else config.channelUuid
-    }
-
     override def toString: String =
-      s"bgapi create_uuid $eventUuid${LINE_TERMINATOR}Job-UUID: job-$eventUuid$MESSAGE_TERMINATOR"
+      s"bgapi create_uuid $eventUuid${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }
 
   sealed trait DisplaceCommand
@@ -602,13 +599,15 @@ object CallCommands {
       java.util.UUID.randomUUID.toString.replace("-", "")
     override def toString: String = {
       val limitStr = limit.fold("0")(_.toString)
-      val fileOpt =  command match {
-        case StartPlay() => filePath.fold(s"${command.toString} moh $limitStr mux") { file =>
-          s"${command.toString} $file $limitStr mux"
-        }
-        case StopPlay() => filePath.fold("") { file =>
-          s"${command.toString} $file"
-        }
+      val fileOpt = command match {
+        case StartPlay() =>
+          filePath.fold(s"${command.toString} moh $limitStr mux") { file =>
+            s"${command.toString} $file $limitStr mux"
+          }
+        case StopPlay() =>
+          filePath.fold("") { file =>
+            s"${command.toString} $file"
+          }
       }
       s"bgapi uuid_displace $target $fileOpt${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
     }
@@ -767,12 +766,12 @@ object CallCommands {
       s"bgapi uuid_hold ${config.channelUuid}${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }
 
-/*
+  /*
   case class Hold(config: ApplicationCommandConfig) extends FSExecuteApp {
     override val application: String = "hold"
     override val args: String = config.channelUuid
   }
-  */
+   */
 //  case class OffHold(config: ApplicationCommandConfig) extends FSExecuteApp {
 //    override val application: String = "unhold"
 //    override val args: String = config.channelUuid
