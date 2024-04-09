@@ -38,20 +38,24 @@ sealed trait FSExecuteApp extends FSCommand {
 
   override def toString: String = {
     val b = StringBuilder.newBuilder
-    b.append(
+    if (application.nonEmpty) b.append(
       s"sendmsg ${config.channelUuid}${LINE_TERMINATOR}Event-UUID: $eventUuid$LINE_TERMINATOR"
     )
-    b.append(
+    if (application.nonEmpty)
+      b.append(
       s"call-command: execute${LINE_TERMINATOR}execute-app-name: $application$LINE_TERMINATOR"
-    )
-    if (config.eventLock)
+      )
+    if (application.nonEmpty && config.eventLock)
       b.append(s"event-lock: ${config.eventLock}$LINE_TERMINATOR")
-    if (config.loops > 1) b.append(s"loops: ${config.loops}$LINE_TERMINATOR")
-    if (config.async) b.append(s"async: ${config.async}$LINE_TERMINATOR")
-    if (args.length > 0)
+    if (application.nonEmpty && config.loops > 1) b.append(s"loops: ${config.loops}$LINE_TERMINATOR")
+    if (application.nonEmpty && config.async) b.append(s"async: ${config.async}$LINE_TERMINATOR")
+    if (application.nonEmpty && args.length > 0)
       b.append(
         s"content-type: text/plain${LINE_TERMINATOR}content-length: ${args.length}$MESSAGE_TERMINATOR$args$LINE_TERMINATOR"
       )
+    else b.append(
+      s"$args$LINE_TERMINATOR"
+    )
     b.toString()
   }
 }
@@ -398,7 +402,9 @@ object CallCommands {
                          config: ApplicationCommandConfig
                        ) extends FSExecuteApp {
 
-    override val application: String = "set"
+    override val application: String =
+      if (options.useBgApi) ""
+      else "set"
 
     /*override def toString: String =
       s"""bgapi ${options.asOriginateCmd} &park()
@@ -406,7 +412,12 @@ object CallCommands {
          |
          |""".stripMargin*/
 
-    override lazy val args: String = {
+    override lazy val args: String = if (options.useBgApi) {
+      s"""bgapi ${options.asOriginateCmd} &park()
+         |Job-UUID: $eventUuid
+         |
+         |""".stripMargin
+    } else {
 
       s"""dial_$eventUuid=$${
          |bgapi ${options.asReplace} &park()
@@ -440,7 +451,8 @@ object CallCommands {
         numberPresentation: Dial.NumberPresentation,
         timeout: FiniteDuration,
         retries: Option[Dial.Retry] = Option.empty,
-        miscArgs: String = ""
+        miscArgs: String = "",
+        useBgApi: Boolean = false
     ) {
       def asOriginateCmd = {
         val vars = Seq(
@@ -560,10 +572,14 @@ object CallCommands {
   final case class CreateUUID(config: ApplicationCommandConfig)
       extends FSCommand {
 
-    override val eventUuid: String =
+    override val eventUuid: String = {
+      if (config.channelUuid.trim.isEmpty)
       java.util.UUID.randomUUID.toString.replace("-", "")
+      else config.channelUuid
+    }
+
     override def toString: String =
-      s"bgapi create_uuid $eventUuid${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
+      s"bgapi create_uuid $eventUuid${LINE_TERMINATOR}Job-UUID: job-$eventUuid$MESSAGE_TERMINATOR"
   }
 
   sealed trait DisplaceCommand
