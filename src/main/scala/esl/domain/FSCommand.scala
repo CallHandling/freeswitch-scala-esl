@@ -417,7 +417,7 @@ object CallCommands {
          |
          |""".stripMargin*/
 
-    override lazy val args: String = if (!config.useSetVar) {
+    override lazy val args: String = if (config.useSetVar) {
       s"""dial_$eventUuid=$${
          |bgapi ${options.asReplace} &park()
          |Job-UUID: $eventUuid
