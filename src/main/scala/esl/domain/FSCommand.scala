@@ -55,10 +55,9 @@ sealed trait FSExecuteApp extends FSCommand {
     if (hasApplication && args.nonEmpty) {
       b.append(s"content-type: text/plain$LINE_TERMINATOR")
       b.append(s"content-length: ${args.length}$MESSAGE_TERMINATOR")
-      b.append(args) // Assumes args is already a String
-    } else {
-      b.append(args) // Assumes args is already a String
     }
+
+    b.append(s"$args") // Assumes args is already a String
 
     b.toString()
   }
@@ -364,18 +363,14 @@ object CallCommands {
     override lazy val args: String = {
       val command = if (bargeIn) {
         s"""bgapi ${options.asReplace} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
-             |Job-UUID: $eventUuid
-             |
-             |""".stripMargin
+             |Job-UUID: $eventUuid""".stripMargin
       } else {
         s"""bgapi ${options.asReplace} &eavesdrop($listenCallId)
-             |Job-UUID: $eventUuid
-             |
-             |""".stripMargin
+             |Job-UUID: $eventUuid""".stripMargin
       }
-      s"""eavesdropResult=$${
-         |$command
-         |}""".stripMargin
+      s"""eavesdropResult=$${$command}
+         |
+         |""".stripMargin
     }
 
     override val application: String = "set"
