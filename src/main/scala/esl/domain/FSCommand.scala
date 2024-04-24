@@ -360,20 +360,25 @@ object CallCommands {
       bargeIn: Boolean,
       options: DialConfig,
       listenCallId: String
-  ) extends FSCommand {
-    override def toString: String = {
-      if (bargeIn) {
-        s"""bgapi ${options.asOriginateCmd} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
+  ) extends FSExecuteApp {
+    override lazy val args: String = {
+      val command = if (bargeIn) {
+        s"""bgapi ${options.asReplace} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
              |Job-UUID: $eventUuid
              |
              |""".stripMargin
       } else {
-        s"""bgapi ${options.asOriginateCmd} &eavesdrop($listenCallId)
+        s"""bgapi ${options.asReplace} &eavesdrop($listenCallId)
              |Job-UUID: $eventUuid
              |
              |""".stripMargin
       }
+      s"""eavesdropResult=$${
+         |$command
+         |}""".stripMargin
     }
+
+    override val application: String = "set"
   }
 
   final case class Dial(
