@@ -114,9 +114,10 @@ object CallCommands {
   }
 
   final case class Break(config: ApplicationCommandConfig, app: Option[String])
-      extends FSExecuteApp {
-    override val application: String = s"break$MESSAGE_TERMINATOR"
-    override lazy val args: String = app.getOrElse("")
+      extends FSCommand {
+    override def toString: String =
+      s"""bgapi uuid_break ${config.channelUuid}
+         |Job-UUID: $eventUuid$MESSAGE_TERMINATOR""".stripMargin
   }
 
   /**
