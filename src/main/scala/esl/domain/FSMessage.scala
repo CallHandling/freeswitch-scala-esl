@@ -184,6 +184,7 @@ case class EventMessage(basicMessage: BasicMessage) extends FSMessage {
     headers.get(HeaderNames.jobCommandArg)
 
   val callerUniqueId: Option[String] = headers.get(HeaderNames.callerUniqueId)
+  val channelCallUniqueId: Option[String] = headers.get(HeaderNames.channelCallUniqueId)
 
   val originalChannelCallState: Option[AnswerStates.AnswerState] =
     headers

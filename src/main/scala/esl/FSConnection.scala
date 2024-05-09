@@ -1071,6 +1071,35 @@ abstract class FSConnection extends StrictLogging {
           }
           commandToQueue.command
         }
+      case (_, _, uuid, Some(EventNames.ChannelHold), _, _) =>
+        for {
+          channelId <- uuid
+          commandToQueue <-
+            eventMap.collectFirst { //TODO change eventMap key for this command
+              case (_, queCommand @ CommandToQueue(command: Hold, _, _))
+                if command.config.channelUuid == channelId =>
+                queCommand
+            }
+        } yield {
+          commandToQueue.executeComplete.complete(Success(eventMessage))
+          if (commandToQueue.executeEvent.isCompleted) {
+            adapter.info(
+              logMarker,
+              s"""Channel call state event for callId
+                 |${eventMessage.headers(HeaderNames.uniqueId)}
+                 |>> MAP command is below
+                 |${eventMap
+                .map({ item =>
+                  s"""appId: ${item._1}
+                     |command
+                     |${item._2.command}
+                     |command type ${item._2.command.getClass}""".stripMargin
+                })
+                .mkString("\n")}""".stripMargin
+            )
+          }
+          commandToQueue.command
+        }
       /*
       case (
             Some(appId),
@@ -1538,6 +1567,8 @@ abstract class FSConnection extends StrictLogging {
               eventMessage.callerUniqueId.contains(command.options.uniqueId)
             case (_, CommandToQueue(command: DialSession, _, _)) =>
               eventMessage.callerUniqueId.contains(command.options.uniqueId)
+            case (_, CommandToQueue(command: Hold, _, _)) =>
+              eventMessage.channelCallUniqueId.contains(command.config.channelUuid)
             case _ => false
           }.toList
           promise <- eventMessage.headers.get("Channel-Call-State") match {
