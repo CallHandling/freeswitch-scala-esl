@@ -1068,6 +1068,7 @@ abstract class FSConnection extends StrictLogging {
                 })
                 .mkString("\n")}""".stripMargin
             )
+            eventMap.remove(commandToQueue.command.eventUuid)
           }
           commandToQueue.command
         }
@@ -1098,6 +1099,7 @@ abstract class FSConnection extends StrictLogging {
                 .mkString("\n")}""".stripMargin
             )
           }
+          eventMap.remove(commandToQueue.command.eventUuid)
           commandToQueue.command
         }
       /*
