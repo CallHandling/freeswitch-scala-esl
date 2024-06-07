@@ -1078,7 +1078,7 @@ abstract class FSConnection extends StrictLogging {
           commandToQueue <-
             eventMap.collectFirst { //TODO change eventMap key for this command
               case (_, queCommand @ CommandToQueue(command: Hold, _, _))
-                if command.config.channelUuid == channelId =>
+                  if command.config.channelUuid == channelId =>
                 queCommand
             }
         } yield {
@@ -1570,7 +1570,9 @@ abstract class FSConnection extends StrictLogging {
             case (_, CommandToQueue(command: DialSession, _, _)) =>
               eventMessage.callerUniqueId.contains(command.options.uniqueId)
             case (_, CommandToQueue(command: Hold, _, _)) =>
-              eventMessage.channelCallUniqueId.contains(command.config.channelUuid)
+              eventMessage.channelCallUniqueId.contains(
+                command.config.channelUuid
+              )
             case _ => false
           }.toList
           promise <- eventMessage.headers.get("Channel-Call-State") match {
@@ -1612,6 +1614,25 @@ abstract class FSConnection extends StrictLogging {
               command
           })
       }
+      case (_, _, _, Some(EventNames.ChannelOutgoing), _, _) =>
+        eventMap.collectFirst({
+          case (
+                key,
+                CommandToQueue(
+                  command: ListenIn,
+                  executeEvent,
+                  executeComplete
+                )
+              )
+              if eventMessage.callerUniqueId
+                .fold(false)(_ == command.options.uniqueId) =>
+            if (!executeEvent.isCompleted)
+              executeEvent.complete(Success(eventMessage))
+            if (executeComplete.isCompleted) {
+              eventMap.remove(key)
+            }
+            command
+        })
       case (_, _, _, Some(EventNames.MediaBugStop), _, _) => {
         val command = eventMap
           .collectFirst({
@@ -2219,6 +2240,42 @@ abstract class FSConnection extends StrictLogging {
       config: ApplicationCommandConfig = ApplicationCommandConfig()
   ): Future[CommandResponse] =
     publishCommand(StopRecordSession(filePath, config))
+
+  /**
+    * Stop record.
+    * Usage:<uuid_record uuid stop>
+    *
+    * @param config   : ApplicationCommandConfig
+    * @return Future[CommandResponse]
+    */
+  def stopRecord(
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
+    publishCommand(StopRecord(config))
+
+  /**
+    * Pause record.
+    * Usage:<uuid_record uuid pause>
+    *
+    * @param config   : ApplicationCommandConfig
+    * @return Future[CommandResponse]
+    */
+  def pauseRecord(
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
+    publishCommand(PauseRecord(config))
+
+  /**
+    * Resume record.
+    * Usage:<uuid_record uuid resume>
+    *
+    * @param config   : ApplicationCommandConfig
+    * @return Future[CommandResponse]
+    */
+  def resumeRecord(
+      config: ApplicationCommandConfig = ApplicationCommandConfig()
+  ): Future[CommandResponse] =
+    publishCommand(ResumeRecord(config))
 
   /**
     * Places a channel "on hold" in the switch, instead of in the phone. Allows for a number of different options, including:

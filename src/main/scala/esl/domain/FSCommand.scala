@@ -363,13 +363,14 @@ object CallCommands {
   ) extends FSExecuteApp {
     override lazy val args: String = {
       val command = if (bargeIn) {
-        s"""bgapi ${options.asReplace} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline
-             |Job-UUID: $eventUuid""".stripMargin
+        //{job_uuid=1234}sofia/internal/foo at bar.com
+        s"""
+           |bgapi {job_uuid=$eventUuid}eval $${${options.asReplace} 'queue_dtmf:w3@500,eavesdrop:$listenCallId' inline}""".stripMargin
       } else {
         s"""bgapi ${options.asReplace} &eavesdrop($listenCallId)
              |Job-UUID: $eventUuid""".stripMargin
       }
-      s"""eavesdropResult=$${$command}
+      s"""eavesdropResult_$eventUuid=$${$command}
          |
          |""".stripMargin
     }
@@ -863,6 +864,48 @@ object CallCommands {
   ) extends FSExecuteApp {
     override val application: String = "stop_record_session"
     override val args: String = filePath
+  }
+
+  /**
+    * Stop record.
+    * Usage: <uuid_record uuid stop>
+    *
+    * @param filePath : String file name
+    * @param config   : ApplicationCommandConfig
+    */
+  final case class StopRecord(
+      config: ApplicationCommandConfig
+  ) extends FSCommand {
+    override def toString(): String =
+      s"bgapi uuid_record ${config.channelUuid} stop${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
+  }
+
+  /**
+    * Pause record.
+    * Usage: <uuid_record uuid pause>
+    *
+    * @param uuid : String channelId
+    * @param config   : ApplicationCommandConfig
+    */
+  final case class PauseRecord(
+      config: ApplicationCommandConfig
+  ) extends FSCommand {
+    override def toString(): String =
+      s"bgapi uuid_record ${config.channelUuid} pause${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
+  }
+
+  /**
+    * Resume record.
+    * Usage: <uuid_record uuid resume>
+    *
+    * @param uuid : String channelId
+    * @param config   : ApplicationCommandConfig
+    */
+  final case class ResumeRecord(
+      config: ApplicationCommandConfig
+  ) extends FSCommand {
+    override def toString(): String =
+      s"bgapi uuid_record ${config.channelUuid} resume${LINE_TERMINATOR}Job-UUID: $eventUuid$MESSAGE_TERMINATOR"
   }
 
   /**
