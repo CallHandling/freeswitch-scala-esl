@@ -864,21 +864,28 @@ abstract class FSConnection extends StrictLogging {
       case eventMessage: EventMessage => {
         val (event, cmd) = handleFSEventMessage(eventMessage)
 
-        adapter.info(
-          logMarker,
-          s"""handleFSEventMessage received EventMessage
-             |matched for command
-             |${cmd}
-             |
-             |>> Event TYPE
-             |EVENT ${eventMessage.eventName.getOrElse("NA")}
-             |>> Event HEADERS
-             |${eventMessage.headers
-            .map(h => h._1 + " : " + h._2)
-            .mkString(space, "\n" + space, "")}
-             |>> Event BODY
-             |${eventMessage.body}""".stripMargin
-        )
+        eventMessage.eventName match {
+          case Some(EventNames.SessionHeartbeat) =>
+          case _ => {
+            adapter.info(
+              logMarker,
+              s"""handleFSEventMessage received EventMessage
+                 |matched for command
+                 |${cmd}
+                 |
+                 |>> Event TYPE
+                 |EVENT ${eventMessage.eventName.getOrElse("NA")}
+                 |>> Event HEADERS
+                 |${eventMessage.headers
+                .map(h => h._1 + " : " + h._2)
+                .mkString(space, "\n" + space, "")}
+                 |>> Event BODY
+                 |${eventMessage.body}""".stripMargin
+            )
+          }
+        }
+
+
 
         FSMessageWithCommand(event, cmd)
       }
