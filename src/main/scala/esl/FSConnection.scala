@@ -1019,12 +1019,14 @@ abstract class FSConnection extends StrictLogging {
             case (_, CommandToQueue(command: AddToConference, _, _))
                 if eventMessage.conferenceName.contains(
                   command.conferenceId
-                ) && eventMessage.action.contains("add-member") =>
+                ) && eventMessage.callerUniqueId.contains(command.config.channelUuid)
+                  && eventMessage.action.contains("add-member") =>
               true
             case (_, CommandToQueue(command: ConferenceCommand, _, _))
                 if eventMessage.conferenceName.contains(
                   command.conferenceId
-                ) && (command.command match {
+                ) && eventMessage.callerUniqueId.contains(command.config.channelUuid)
+                  && (command.command match {
                   case SendConferenceCommand(_, cmd, _)
                       if eventMessage.action.fold(false)(_.startsWith(cmd)) =>
                     true
