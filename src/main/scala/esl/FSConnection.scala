@@ -2327,8 +2327,10 @@ abstract class FSConnection extends StrictLogging {
   }
 
   def kill = {
+    adapter.info(logMarker, s"about to kill $getConnectionId")
     killSwitch.shutdown()
     queue.complete()
+    adapter.info(logMarker, s"killed $getConnectionId")
   }
 }
 
