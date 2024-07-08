@@ -1040,6 +1040,12 @@ abstract class FSConnection extends StrictLogging {
                   case _ => false
                 }) =>
               true
+            case (_, CommandToQueue(ConferenceCommand(conferenceId, command, _), _, _))
+                if eventMessage.conferenceName.contains(conferenceId) && eventMessage.action.contains("kick-member") =>
+              command match {
+                case SendConferenceCommand(_, cmd, _) if eventMessage.action.fold(false)(_.startsWith(cmd)) => true
+                case _ => false
+              }
             case _ => false
           }
         findResult match {
