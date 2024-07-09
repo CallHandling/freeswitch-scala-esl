@@ -49,22 +49,7 @@ lazy val commonSettings = Seq(
   releaseUseGlobalVersion := false,
   licenses := Seq("Apache 2.0" -> url("https://www.apache.org/licenses/LICENSE-2.0")),
   homepage := Some(url("https://github.com/CallHandling/freeswitch-scala-esl")),
-  releaseProcess := Seq[ReleaseStep](
-    checkSnapshotDependencies,              // : ReleaseStep
-    inquireVersions,                        // : ReleaseStep
-    runClean,                               // : ReleaseStep
-    runTest,                                // : ReleaseStep
-    setReleaseVersion,                      // : ReleaseStep
-    commitReleaseVersion,                   // : ReleaseStep, performs the initial git checks
-    tagRelease,                             // : ReleaseStep
-    //ReleaseStep(action = Command.process(s"""sonatypeOpen "${organization.value}" "${name.value} v${version.value};"""", _)),
-    ReleaseStep(action = Command.process("publishSigned", _)),
-    ReleaseStep(action = Command.process("sonatypeBundleRelease", _)),
-    setNextVersion,                         // : ReleaseStep
-    commitNextVersion,                      // : ReleaseStep
-    pushChanges
 
-  )
 )
 
 scalacOptions ++= Seq(
